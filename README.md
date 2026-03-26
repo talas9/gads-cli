@@ -23,26 +23,32 @@ Unified CLI for managing Google Ads, Google Business Profile, Google Merchant Ce
 - Agent enforcement for multi-agent setups (optional)
 - Configurable timezone (IANA format)
 
-## Quick Start
+## Install
+
+One command — downloads the CLI, detects your AI platforms (Claude Code, gsd-pi, ruflo), installs agents + skills + hooks, and runs auth setup:
 
 ```bash
-# Clone
+curl -fsSL https://raw.githubusercontent.com/talas9/google-business-cli/main/scripts/install.sh | bash
+```
+
+The installer is interactive. It will:
+1. Download the CLI to `~/.google-business-cli/`
+2. Install Python dependencies
+3. Detect Claude Code, gsd-pi, and ruflo
+4. Ask which platforms to wire up (global or project scope)
+5. Install a specialized `google-platform-operator` agent + `google-business-cli` skill + update hook
+6. Run the OAuth setup wizard
+
+### Manual Setup
+
+If you prefer manual installation:
+
+```bash
 git clone https://github.com/talas9/google-business-cli.git
 cd google-business-cli
-
-# Install
 pip install .
-# Or install dependencies directly:
-pip install click requests google-auth google-auth-oauthlib python-dotenv
-
-# Configure
-cp .env.example .env
-# Edit .env with your Google Ads customer ID, developer token, etc.
-
-# Generate OAuth token (opens browser for Google sign-in)
+cp .env.example .env && $EDITOR .env
 python generate_token.py
-
-# Verify everything works
 ./gads doctor
 ```
 

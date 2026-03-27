@@ -1,6 +1,6 @@
 """Internal library for the Google Business CLI."""
 
-__version__ = "2.2.1"
+__version__ = "2.2.2"
 
 from .config import (
     PROJECT_ROOT,

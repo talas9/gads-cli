@@ -249,6 +249,14 @@ def auth_setup():
     if DEV_TOKEN:
         click.secho("  ✓ GOOGLE_ADS_DEVELOPER_TOKEN is set", fg="green")
     else:
+        click.echo("  ⚠  Developer tokens are created from a MANAGER (MCC) account,")
+        click.echo("     NOT from your regular Google Ads account.\n")
+        click.echo("  If you don't have a manager account yet:")
+        click.echo("    1. Go to:")
+        click.secho("       https://ads.google.com/intl/en/home/tools/manager-accounts/", fg="blue")
+        click.echo("    2. Create a manager account (free, takes 2 minutes)")
+        click.echo("    3. Link your Google Ads account(s) to it")
+        click.echo("    4. Then go to API Center in the manager account:\n")
         click.echo("  The developer token controls your API access level:\n")
         click.echo("    ┌──────────────────────────────────────────────────────────┐")
         click.echo("    │  TEST ACCOUNT TOKEN  (instant, no approval needed)      │")
@@ -265,10 +273,11 @@ def auth_setup():
         click.echo("    │  • Google reviews your API usage before granting        │")
         click.echo("    └──────────────────────────────────────────────────────────┘\n")
         click.echo("  To get your developer token:")
-        click.echo("    1. Go to:")
+        click.echo("    1. Log into your MANAGER account (not your regular ads account)")
+        click.echo("    2. Go to:")
         click.secho("       https://ads.google.com/aw/apicenter", fg="blue")
-        click.echo("    2. If you see 'Apply for Basic Access' → click it and wait")
-        click.echo("    3. Copy your developer token once it shows 'Approved'\n")
+        click.echo("    3. If you see 'Apply for Basic Access' → click it and wait")
+        click.echo("    4. Copy your developer token once it shows 'Approved'\n")
         click.secho("  ℹ  If you need Keyword Planner commands, apply for Standard", fg="cyan")
         click.secho("     Access after getting Basic. Google may take 1-4 weeks.\n", fg="cyan")
         token = click.prompt("  Paste your developer token (or press Enter to skip)", default="", show_default=False)
@@ -300,18 +309,24 @@ def auth_setup():
             click.secho("  ⚠ Skipped — add GOOGLE_ADS_CUSTOMER_ID to .env later", fg="yellow")
     click.echo()
 
-    # ── Step 6: Manager account (optional) ───────────────────
-    click.secho("  Step 6: Manager Account ID (optional)\n", fg="white", bold=True)
+    # ── Step 6: Manager account ─────────────────────────────
+    click.secho("  Step 6: Manager Account ID\n", fg="white", bold=True)
     if LOGIN_CUSTOMER_ID:
         click.secho(f"  ✓ GOOGLE_ADS_LOGIN_CUSTOMER_ID is set", fg="green")
     else:
-        click.echo("  If your account is managed by an MCC (manager account),")
-        click.echo("  enter the manager's customer ID. Otherwise skip.\n")
-        mcc = click.prompt("  Manager customer ID (or Enter to skip)", default="", show_default=False)
+        click.echo("  This is the manager (MCC) account where your developer token")
+        click.echo("  was created. It's REQUIRED if you created an MCC in Step 4.")
+        click.echo("  Find it at the top of your manager account in Google Ads.\n")
+        mcc = click.prompt("  Manager customer ID, 10 digits (or Enter to skip)", default="", show_default=False)
         if mcc.strip():
             clean_mcc = mcc.strip().replace("-", "").replace(" ", "")
-            _append_env(env_path, "GOOGLE_ADS_LOGIN_CUSTOMER_ID", clean_mcc)
-            click.secho("  ✓ Manager ID saved to .env", fg="green")
+            if len(clean_mcc) == 10 and clean_mcc.isdigit():
+                _append_env(env_path, "GOOGLE_ADS_LOGIN_CUSTOMER_ID", clean_mcc)
+                click.secho("  ✓ Manager ID saved to .env", fg="green")
+            else:
+                click.secho(f"  ⚠ '{mcc}' doesn't look like a 10-digit ID — add manually to .env", fg="yellow")
+        else:
+            click.secho("  ⚠ Skipped — if API calls fail with auth errors, set this", fg="yellow")
     click.echo()
 
     # ── Step 7: Optional services ────────────────────────────

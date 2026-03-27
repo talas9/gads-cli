@@ -81,12 +81,16 @@ Your Google Ads developer token determines which API features you can use:
 - Any future commands that use restricted API endpoints
 
 **How to get your token:**
-1. Go to [Google Ads API Center](https://ads.google.com/aw/apicenter)
-2. If you see "Apply for Basic Access" → apply and wait for approval email (1-3 business days)
-3. Once approved, copy your developer token
-4. If you need Keyword Planner commands, apply for Standard Access after Basic is approved — Google reviews your API usage and may take 1-4 weeks
+1. **Create a Manager (MCC) account** if you don't have one — developer tokens are created from manager accounts, NOT from regular Google Ads accounts:
+   - Go to [ads.google.com/intl/en/home/tools/manager-accounts](https://ads.google.com/intl/en/home/tools/manager-accounts/)
+   - Create a manager account (free, takes 2 minutes)
+   - Link your Google Ads account(s) to the manager account
+2. Log into your **manager account** and go to [Google Ads API Center](https://ads.google.com/aw/apicenter)
+3. If you see "Apply for Basic Access" → apply and wait for approval email (1-3 business days)
+4. Once approved, copy your developer token
+5. If you need Keyword Planner commands, apply for Standard Access after Basic is approved — Google reviews your API usage and may take 1-4 weeks
 
-> **Note:** The developer token is tied to your Google Ads *manager account* (MCC), not individual ad accounts. If you don't have an MCC, create one at [ads.google.com/intl/en/home/tools/manager-accounts](https://ads.google.com/intl/en/home/tools/manager-accounts/).
+> **Important:** The developer token lives in your *manager account* (MCC). The `GOOGLE_ADS_LOGIN_CUSTOMER_ID` in your `.env` should be set to the manager account's customer ID. The `GOOGLE_ADS_CUSTOMER_ID` is the actual ad account you want to manage.
 
 ### 2. Install
 

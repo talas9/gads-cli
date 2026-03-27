@@ -63,7 +63,30 @@ python generate_token.py
   - [Content API for Shopping](https://console.cloud.google.com/apis/library/content.googleapis.com) (for Merchant Center)
   - [Google Analytics Data API](https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com) (for GA4)
 - OAuth 2.0 client credentials (`client_secret.json`) from [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
-- A [Google Ads developer token](https://ads.google.com/aw/apicenter)
+- A [Google Ads developer token](https://ads.google.com/aw/apicenter) (see [Developer Token Access Levels](#developer-token-access-levels) below)
+
+### Developer Token Access Levels
+
+Your Google Ads developer token determines which API features you can use:
+
+| Level | Approval | What you get |
+|-------|----------|-------------|
+| **Test Account** | Instant | Works only with test accounts — not real ad accounts |
+| **Basic Access** | Apply, 1-3 days | Campaign management, reporting, audience management, most CLI commands |
+| **Standard Access** | Apply, 1-4 weeks | Everything in Basic + Keyword Planner, Keyword Forecasting, Reach Planner, Bidding Strategies API |
+
+**Most commands in this CLI work with Basic Access.** Standard Access is only needed for:
+- `gads keyword ideas` — Keyword Planner (generateKeywordIdeas)
+- `gads keyword forecast` — Keyword volume forecasting (generateKeywordForecastMetrics)
+- Any future commands that use restricted API endpoints
+
+**How to get your token:**
+1. Go to [Google Ads API Center](https://ads.google.com/aw/apicenter)
+2. If you see "Apply for Basic Access" → apply and wait for approval email (1-3 business days)
+3. Once approved, copy your developer token
+4. If you need Keyword Planner commands, apply for Standard Access after Basic is approved — Google reviews your API usage and may take 1-4 weeks
+
+> **Note:** The developer token is tied to your Google Ads *manager account* (MCC), not individual ad accounts. If you don't have an MCC, create one at [ads.google.com/intl/en/home/tools/manager-accounts](https://ads.google.com/intl/en/home/tools/manager-accounts/).
 
 ### 2. Install
 
@@ -221,6 +244,7 @@ python fetch_daily.py --days 7 --config --push
 | `GOOGLE_MERCHANT_CENTER_ID` | For MC | — | Merchant Center account ID |
 | `GOOGLE_GA4_PROPERTY_ID` | For GA4 | — | GA4 property ID (digits only) |
 | `GADS_TIMEZONE` | No | `UTC` | IANA timezone (e.g. `America/New_York`, `Asia/Dubai`) |
+| `GADS_CURRENCY` | No | `USD` | ISO 4217 currency code (e.g. `USD`, `AED`, `EUR`, `GBP`) |
 | `GADS_PROJECT_ROOT` | No | auto | Parent project root directory |
 | `GADS_DB_PATH` | No | `../data/gads.db` | SQLite database path |
 | `GADS_CREDENTIALS_PATH` | No | `../credentials/google-ads-oauth.json` | OAuth token path |

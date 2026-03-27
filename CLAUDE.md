@@ -47,7 +47,7 @@ python generate_token.py    # Get OAuth token (opens browser)
 All configuration via environment variables or `.env` file. See `.env.example` for the full list.
 
 **Required:**
-- `GOOGLE_ADS_DEVELOPER_TOKEN` — from Google Ads API Center
+- `GOOGLE_ADS_DEVELOPER_TOKEN` — from Google Ads API Center (Basic Access for most commands; Standard Access needed for Keyword Planner)
 - `GOOGLE_ADS_CUSTOMER_ID` — 10 digits, no dashes
 
 **Optional:**

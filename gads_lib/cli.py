@@ -1872,6 +1872,117 @@ def audience_list(as_json):
             for r in results]
     print_table(rows, ["name", "id", "type", "search_size", "display_size", "match_rate"])
 
+@audience_group.command("create")
+@click.argument("name")
+@click.option("--description", "-d", default="", help="List description.")
+@click.option("--life-span", type=int, default=540, help="Membership life span in days (default: 540).")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def audience_create_cmd(name, description, life_span, dry_run, yes, as_json):
+    """Create a Customer Match user list."""
+    enforce_allowed_caller()
+    if not _confirm_and_log(f"create audience list '{name}'", "create audience", dry_run, yes):
+        return
+    from gads_lib.ads import audience_create_list
+    result = audience_create_list(get_credentials(), name, description=description, life_span=life_span)
+    _auto_log("audience_create", f"'{name}' (life_span={life_span}d)")
+    if as_json:
+        return print_json(result)
+    rn = result.get("results", [{}])[0].get("resourceName", "")
+    click.secho(f"✓ Created audience list '{name}' → {rn}", fg="green")
+
+@audience_group.command("upload")
+@click.argument("csv_path", type=click.Path(exists=True))
+@click.option("--list-name", required=True, help="Name of the target user list (must exist or use --create).")
+@click.option("--create", "create_if_missing", is_flag=True, help="Create the list if it doesn't exist.")
+@click.option("--description", default="", help="Description for new list (with --create).")
+@click.option("--life-span", type=int, default=540, help="Membership life span for new list (default: 540 days).")
+@click.option("--batch-size", type=int, default=100, help="Upload batch size (default: 100).")
+@click.option("--max-rows", type=int, default=None, help="Max rows to upload (for testing).")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def audience_upload(csv_path, list_name, create_if_missing, description, life_span, batch_size, max_rows, dry_run, yes, as_json):
+    """Upload a CSV to a Customer Match list.
+
+    CSV format: Phone,Email,First Name,Last Name,Country
+
+    \b
+    All PII is SHA-256 hashed before upload.
+    Phone numbers are normalized to E.164 format.
+    Invalid names (companies, garbage, special chars) are skipped — phone-only upload.
+    Consent fields (adUserData + adPersonalization = GRANTED) are included automatically.
+
+    \b
+    Example:
+      gads audience upload data/audiences/my_list.csv --list-name "My Audience" --create
+      gads audience upload contacts.csv --list-name "Existing List" --max-rows 10
+    """
+    enforce_allowed_caller()
+    from gads_lib.ads import audience_find_list, audience_create_list, audience_upload_csv
+
+    creds = get_credentials()
+
+    # Find or create the list
+    list_rn = audience_find_list(creds, list_name)
+    if not list_rn:
+        if create_if_missing:
+            if not _confirm_and_log(f"create list '{list_name}' + upload {csv_path}", "create + upload", dry_run, yes):
+                return
+            result = audience_create_list(creds, list_name, description=description, life_span=life_span)
+            list_rn = result.get("results", [{}])[0].get("resourceName", "")
+            click.secho(f"  ✓ Created list: {list_rn}", fg="green")
+        else:
+            click.secho(f"✗ List '{list_name}' not found. Use --create to create it.", fg="red", err=True)
+            raise SystemExit(1)
+    else:
+        click.echo(f"  Found list: {list_rn}")
+        if not _confirm_and_log(f"upload {csv_path} → '{list_name}'", "upload audience", dry_run, yes):
+            return
+
+    if dry_run:
+        return
+
+    # Upload
+    job_rn, stats = audience_upload_csv(creds, list_rn, csv_path, batch_size=batch_size, max_rows=max_rows)
+    _auto_log("audience_upload", f"'{list_name}': {stats['rows_uploaded']} rows, job={job_rn}")
+
+    if as_json:
+        return print_json(stats)
+    click.secho(f"\n  ✓ Upload complete", fg="green")
+    click.echo(f"    List:     {list_name}")
+    click.echo(f"    Rows:     {stats['rows_uploaded']}")
+    click.echo(f"    Job:      {job_rn}")
+    click.echo(f"\n  Check job status:  gads query \"SELECT offline_user_data_job.id, offline_user_data_job.status FROM offline_user_data_job WHERE offline_user_data_job.resource_name = '{job_rn}'\"")
+    click.echo(f"  Check list sizes:  gads audience list --json | grep '{list_name}'")
+
+@audience_group.command("job-status")
+@click.argument("job_id")
+@click.option("--json", "as_json", is_flag=True)
+def audience_job_status(job_id, as_json):
+    """Check status of a Customer Match upload job."""
+    results = run_gaql(get_credentials(), f"""
+        SELECT offline_user_data_job.id, offline_user_data_job.status,
+               offline_user_data_job.failure_reason,
+               offline_user_data_job.operation_metadata.match_rate_range,
+               offline_user_data_job.customer_match_user_list_metadata.user_list
+        FROM offline_user_data_job WHERE offline_user_data_job.id = {job_id}""")
+    if as_json:
+        return print_json(results)
+    if not results:
+        click.echo(f"  Job {job_id} not found")
+        return
+    j = results[0].get("offlineUserDataJob", {})
+    meta = j.get("customerMatchUserListMetadata", {})
+    op_meta = j.get("operationMetadata", {})
+    click.echo(f"  Job ID:      {j.get('id','')}")
+    click.echo(f"  Status:      {j.get('status','')}")
+    click.echo(f"  Match range: {op_meta.get('matchRateRange','')}")
+    click.echo(f"  User list:   {meta.get('userList','')}")
+    if j.get("failureReason"):
+        click.secho(f"  Failure:     {j['failureReason']}", fg="red")
+
 
 # ── Report commands ──────────────────────────────────────────
 

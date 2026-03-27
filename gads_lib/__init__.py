@@ -1,6 +1,6 @@
 """Internal library for the gads CLI."""
 
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 
 from .config import (
     PROJECT_ROOT,
@@ -29,6 +29,10 @@ from .ads import (
     ads_upload_click_conversions,
     generate_keyword_ideas,
     generate_keyword_forecast,
+    sanitize_keyword,
+    audience_find_list,
+    audience_create_list,
+    audience_upload_csv,
 )
 from .db import get_db
 from .gbp import (

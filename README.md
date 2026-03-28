@@ -63,7 +63,7 @@ python generate_token.py
 - Python 3.10+
 - A Google Cloud project with APIs enabled (see below)
 - OAuth 2.0 client credentials (`client_secret.json`)
-- A Google Ads developer token (from a [Manager Account / MCC](https://ads.google.com/intl/en/home/tools/manager-accounts/))
+- A Google Ads developer token (from a [Manager Account / MCC](https://ads.google.com/intl/en/home/tools/manager-accounts/)) — **required for all Google Ads API commands**, but not needed for GBP, Merchant Center, or GA4
 
 ### Google Cloud Project Setup
 
@@ -103,28 +103,56 @@ python generate_token.py
 
 ### Developer Token Access Levels
 
-Your Google Ads developer token determines which API features you can use:
+Your Google Ads developer token determines which API features you can use and how many operations you can perform daily:
 
-| Level | Approval | What you get |
-|-------|----------|-------------|
-| **Test Account** | Instant | Works only with test accounts — not real ad accounts |
-| **Basic Access** | Apply, 1-3 days | Campaign management, reporting, audience management, most CLI commands |
-| **Standard Access** | Apply, 1-4 weeks | Everything in Basic + Keyword Planner, Keyword Forecasting, Reach Planner, Bidding Strategies API |
+| Level | Approval | Ops/day | Production | Features | Notes |
+|-------|----------|---------|------------|----------|-------|
+| **Test Account** | Instant | 15,000 | Test only | All basic features | Free tier for testing |
+| **Explorer** | Auto-granted in some cases | 2,880 prod / 15,000 test | Yes | Most features | Sufficient for basic automation |
+| **Basic Access** | Apply, ~2 biz days | 15,000 | Yes | Campaign mgmt, audience mgmt, reporting, keyword research | Most users need this level |
+| **Standard Access** | Apply, ~10 biz days | Unlimited | Yes | Everything in Basic + Keyword Planner, Audience Insights, Reach Planner, Billing | Required for advanced features |
 
-**Most commands in this CLI work with Basic Access.** Standard Access is only needed for:
-- `gads keyword ideas` — Keyword Planner (generateKeywordIdeas)
-- `gads keyword forecast` — Keyword volume forecasting (generateKeywordForecastMetrics)
-- Any future commands that use restricted API endpoints
+### Developer Token is REQUIRED
 
-**How to get your token:**
+**For Google Ads API commands:** Developer token is absolutely required. It is NOT optional. Without it, ALL Google Ads operations will fail.
+
+**For other services:** GBP, Merchant Center, and GA4 commands do NOT require a developer token — they only need OAuth credentials.
+
+### Restricted Features (Require Standard Access)
+
+These features require Standard Access level:
+- **Keyword Planner** — `gads keyword ideas`, generate keyword ideas with search volume estimates
+- **Keyword Forecasting** — `gads keyword forecast`, forecast search volume and CPC
+- **Audience Insights** — audience composition and demographics
+- **Reach & Frequency Planner** — media buying planning
+- **Billing API** — PaymentsAccountService, BillingSetupService, InvoiceService
+- **Account Creation** — CustomerService.CreateCustomerClient (creating new ad accounts)
+- **User Management** — CustomerUserAccessService (granting users account access)
+
+### Important: Customer Match API Deprecation (April 1, 2026)
+
+**Starting April 1, 2026, uploading Customer Match data via `OfflineUserDataJobService` will fail if your developer token has never sent a successful Customer Match request before.** 
+
+If you plan to use `gads audience upload`, either:
+1. Upload before April 1, 2026 to establish token eligibility, OR
+2. Use the Data Manager API instead (requires different OAuth scopes and API calls)
+
+### How to Get Your Developer Token
+
 1. **Create a Manager (MCC) account** if you don't have one — developer tokens are created from manager accounts, NOT from regular Google Ads accounts:
    - Go to [ads.google.com/intl/en/home/tools/manager-accounts](https://ads.google.com/intl/en/home/tools/manager-accounts/)
    - Create a manager account (free, takes 2 minutes)
    - Link your Google Ads account(s) to the manager account
-2. Log into your **manager account** and go to [Google Ads API Center](https://ads.google.com/aw/apicenter)
-3. If you see "Apply for Basic Access" → apply and wait for approval email (1-3 business days)
-4. Once approved, copy your developer token
-5. If you need Keyword Planner commands, apply for Standard Access after Basic is approved — Google reviews your API usage and may take 1-4 weeks
+
+2. **Log into your manager account** and go to [Google Ads API Center](https://ads.google.com/aw/apicenter)
+
+3. **Apply for access:**
+   - If you see "Apply for Basic Access" → apply and wait for approval (1-3 business days)
+   - If you're already approved, your developer token is displayed
+
+4. **For Keyword Planner features only:** After Basic Access is approved, apply for Standard Access. Google reviews your API usage history and this typically takes 1-4 weeks.
+
+5. **Copy your developer token** and set `GOOGLE_ADS_DEVELOPER_TOKEN` in your `.env`
 
 > **Important:** The developer token lives in your *manager account* (MCC). The `GOOGLE_ADS_LOGIN_CUSTOMER_ID` in your `.env` should be set to the manager account's customer ID. The `GOOGLE_ADS_CUSTOMER_ID` is the actual ad account you want to manage.
 
@@ -275,20 +303,35 @@ python fetch_daily.py --days 7 --config --push
 
 ## Configuration Reference
 
-| Variable | Required | Default | Description |
+| Variable | Required For | Scope | Description |
 |----------|----------|---------|-------------|
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | — | From [Google Ads API Center](https://ads.google.com/aw/apicenter) |
-| `GOOGLE_ADS_CUSTOMER_ID` | Yes | — | 10-digit account ID (no dashes) |
-| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | For MCC | — | Manager (MCC) account ID |
-| `GOOGLE_ADS_API_VERSION` | No | `v19` | Google Ads API version |
-| `GOOGLE_MERCHANT_CENTER_ID` | For MC | — | Merchant Center account ID |
-| `GOOGLE_GA4_PROPERTY_ID` | For GA4 | — | GA4 property ID (digits only) |
-| `GADS_TIMEZONE` | No | `UTC` | IANA timezone (e.g. `America/New_York`, `Asia/Dubai`) |
-| `GADS_CURRENCY` | No | `USD` | ISO 4217 currency code (e.g. `USD`, `AED`, `EUR`, `GBP`) |
-| `GADS_PROJECT_ROOT` | No | auto | Parent project root directory |
-| `GADS_DB_PATH` | No | `../data/gads.db` | SQLite database path |
-| `GADS_CREDENTIALS_PATH` | No | `../credentials/google-ads-oauth.json` | OAuth token path |
-| `GADS_SNAPSHOTS_DIR` | No | `../snapshots` | Snapshot output directory |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Google Ads API commands | Google Ads only | Developer token from [Google Ads API Center](https://ads.google.com/aw/apicenter) — absolutely required for ALL ads operations |
+| `GOOGLE_ADS_CUSTOMER_ID` | Google Ads API commands | Google Ads only | 10-digit account ID (no dashes) |
+| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | MCC/manager setups | Google Ads only | Manager (MCC) account ID — required if using multi-account setup |
+| `GOOGLE_ADS_API_VERSION` | Optional | Google Ads | Default: `v19` |
+| `GOOGLE_MERCHANT_CENTER_ID` | Merchant Center commands | Merchant Center | Account ID from Merchant Center dashboard |
+| `GOOGLE_GA4_PROPERTY_ID` | GA4 commands | GA4 | Property ID (digits only) — e.g. `271773771` |
+| `GADS_TIMEZONE` | Optional | All | IANA timezone (default: `UTC`, examples: `America/New_York`, `Asia/Dubai`, `Europe/London`) |
+| `GADS_CURRENCY` | Optional | All | ISO 4217 currency code (default: `USD`, examples: `AED`, `EUR`, `GBP`) |
+| `GADS_PROJECT_ROOT` | Optional | All | Project root directory override — auto-detected if not set |
+| `GADS_DB_PATH` | Optional | All | SQLite database path (default: `../data/gads.db`) |
+| `GADS_CREDENTIALS_PATH` | Optional | All | OAuth token path (default: `../credentials/google-ads-oauth.json`) |
+| `GADS_SNAPSHOTS_DIR` | Optional | All | Snapshot output directory (default: `../snapshots`) |
+
+### Command Requirements
+
+| Commands | Needs dev token? | Needs OAuth? | Min access level |
+|----------|-----------------|-------------|-----------------|
+| `gads gbp *` | No | Yes (business.manage) | N/A |
+| `gads merchant *` | No | Yes (content) | N/A |
+| `gads ga4 *` | No | Yes (analytics.readonly) | N/A |
+| `gads query`, `perf`, `config`, `refresh`, `snapshot`, `log` | Yes | Yes (adwords) | Explorer |
+| `gads campaign *`, `gads adgroup *`, `gads ad *`, `gads conversion *`, `gads audience list`, `gads report *` | Yes | Yes (adwords) | Explorer |
+| `gads keyword add`, `keyword remove`, `keyword negative`, `keyword search-terms` | Yes | Yes (adwords) | Explorer |
+| `gads keyword ideas` | Yes | Yes (adwords) | **Standard** |
+| `gads keyword forecast` | Yes | Yes (adwords) | **Standard** |
+| `gads audience upload` | Yes | Yes (adwords) | Basic (note: April 2026 Customer Match deprecation) |
+| `gads asset *`, `gads campaign budget`, `gads campaign status`, `gads adgroup create`, `gads adgroup status` | Yes | Yes (adwords) | Explorer |
 
 ### Agent Enforcement (Optional)
 

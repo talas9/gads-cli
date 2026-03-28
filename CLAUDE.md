@@ -1,83 +1,223 @@
 # gads-cli
 
-Unified Google platform CLI for managing Google Ads, Google Business Profile, Google Merchant Center, and GA4.
+Unified Google platform CLI for Google Ads, Google Business Profile, Google Merchant Center, and GA4. Built for AI agents — all commands support `--json` and `--help`.
 
 ## Quick Start
 
 ```bash
-cp .env.example .env        # Fill in your credentials
-python generate_token.py    # Get OAuth token (opens browser)
-./gads doctor               # Verify setup
+# 1. Configure environment
+cp .env.example .env
+# Edit .env with your dev token (required), customer ID, and OAuth paths
+
+# 2. Generate OAuth token (opens browser for consent)
+python generate_token.py
+
+# 3. Verify setup
+./gads doctor
 ```
 
-## Commands
+## Command Taxonomy
+
+| Group | Subcommands | Purpose | Needs dev token? |
+|-------|-----------|---------|-----------------|
+| `auth` | `status`, `setup`, `login`, `revoke`, `test` | Credential management and diagnostics | No |
+| `campaign` | `list`, `status`, `perf`, `budget` | Campaign management and performance | Yes |
+| `adgroup` | `list`, `status`, `create` | Ad group management | Yes |
+| `ad` | (aliases `ad`) | Ad management | Yes |
+| `keyword` | `list`, `add`, `remove`, `negative`, `search-terms`, `ideas`, `forecast` | Keyword research and management | Yes |
+| `asset` | (images, sitelinks, callouts) | Asset management | Yes |
+| `conversion` | `list`, `create`, `tag`, `perf`, `upload` | Conversion tracking | Yes |
+| `audience` | `list`, `create`, `upload`, `job-status` | Audience and user list management | Yes |
+| `report` | `geo`, `hourly`, `devices`, `search-terms` | Specialized performance reports | Yes |
+| `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply` | Google Business Profile management | No |
+| `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center product management | No |
+| `ga4` | `report`, `realtime`, `metadata` | Google Analytics 4 reporting | No |
+| Top-level | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `doctor` | GAQL queries, syncing, snapshots, and diagnostics | Yes (except `doctor`) |
+
+## Authentication Requirements by Service
+
+### Google Ads Commands
+- **Developer token:** Required (from Google Ads API Center)
+- **OAuth scopes:** `adwords` scope
+- **Access level:** Explorer for most commands; Standard for Keyword Planner / Forecasting
+- **Credentials:** `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`
+- **Important:** Without the developer token, ALL Google Ads API commands fail
+
+### Google Business Profile Commands
+- **Developer token:** NOT needed
+- **OAuth scopes:** `business.manage` scope
+- **Credentials:** `GOOGLE_ADS_LOGIN_CUSTOMER_ID` (optional, for account selection)
+
+### Merchant Center Commands
+- **Developer token:** NOT needed
+- **OAuth scopes:** `content` scope
+- **Credentials:** `GOOGLE_MERCHANT_CENTER_ID`
+
+### GA4 Commands
+- **Developer token:** NOT needed
+- **OAuth scopes:** `analytics.readonly` scope (some reports need `analyticsdata.googleapis.com` enabled)
+- **Credentials:** `GOOGLE_GA4_PROPERTY_ID`
+
+## Common GAQL Patterns
 
 ```bash
-./gads --help               # All commands
-./gads doctor               # Readiness check
-./gads auth status          # Credential status (never prints secrets)
+# Basic query
+./gads query "SELECT campaign.name, campaign.id FROM campaign"
 
-# Google Ads
-./gads query "SELECT campaign.name FROM campaign"
-./gads perf --days 7         # Performance from local DB
-./gads config --json         # Campaign configs from API
-./gads refresh --days 3      # Pull API data into local DB
-./gads snapshot baseline     # Snapshot configs before changes
-./gads log "action" "details" # Append to changelog
+# With metrics
+./gads query "SELECT campaign.name, metrics.clicks, metrics.conversions FROM campaign WHERE metrics.clicks > 0"
 
-# Google Business Profile
-./gads gbp accounts
-./gads gbp locations --account accounts/123
-./gads gbp reviews locations/456
-./gads gbp reply-review accounts/123/locations/456/reviews/789 "Thank you!"
+# Date-based filtering (yesterday only)
+./gads query "SELECT campaign.name, metrics.cost_micros FROM campaign WHERE segments.date = '2026-03-27'"
 
-# Merchant Center
-./gads merchant status
-./gads merchant products --limit 10
-./gads merchant feeds
+# Filter by campaign type
+./gads query "SELECT campaign.name FROM campaign WHERE campaign.advertising_channel_type = 'SEARCH'"
 
-# GA4
-./gads ga4 report -d date -m activeUsers --start 7daysAgo
-./gads ga4 realtime
-./gads ga4 metadata
+# Order and limit
+./gads query "SELECT campaign.name, metrics.clicks FROM campaign ORDER BY metrics.clicks DESC LIMIT 10"
+
+# Ad group criteria (keywords)
+./gads query "SELECT campaign.name, ad_group.name, ad_group_criterion.keyword.text FROM ad_group_criterion"
+
+# Smart/Performance Max campaigns
+./gads query "SELECT campaign.name FROM campaign WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'"
 ```
 
-## Configuration
+## Key Environment Variables
 
-All configuration via environment variables or `.env` file. See `.env.example` for the full list.
+```bash
+# REQUIRED for Google Ads operations
+GOOGLE_ADS_DEVELOPER_TOKEN=xxxxxxxxxxxxxxxx      # From API Center
+GOOGLE_ADS_CUSTOMER_ID=1234567890                # 10 digits, no dashes
 
-**Required:**
-- `GOOGLE_ADS_DEVELOPER_TOKEN` — from Google Ads API Center (Basic Access for most commands; Standard Access needed for Keyword Planner)
-- `GOOGLE_ADS_CUSTOMER_ID` — 10 digits, no dashes
+# REQUIRED for specific services (optional overall)
+GOOGLE_ADS_LOGIN_CUSTOMER_ID=9999999999          # MCC manager account ID
+GOOGLE_MERCHANT_CENTER_ID=12345678               # MC account
+GOOGLE_GA4_PROPERTY_ID=271773771                 # GA4 property ID
 
-**Optional:**
-- `GOOGLE_ADS_LOGIN_CUSTOMER_ID` — MCC manager ID
-- `GOOGLE_MERCHANT_CENTER_ID` — for Merchant Center commands
-- `GOOGLE_GA4_PROPERTY_ID` — for GA4 commands
-- `GADS_TIMEZONE` — IANA timezone (default: UTC)
+# Optional configuration
+GADS_TIMEZONE=Asia/Dubai                         # Default: UTC
+GADS_CURRENCY=AED                                # Default: USD
+GADS_API_VERSION=v19                             # Default: v19
+
+# Paths (auto-detected by default)
+GADS_CREDENTIALS_PATH=credentials/google-ads-oauth.json
+GADS_DB_PATH=data/gads.db
+GADS_SNAPSHOTS_DIR=snapshots
+```
 
 ## Architecture
 
-- `gads` — main CLI entry point (Click-based, Python 3.10+)
-- `gads_lib/` — modular library:
-  - `config.py` — environment-driven configuration, zero hardcoded values
-  - `auth.py` — OAuth credential management with auto-refresh
-  - `ads.py` — Google Ads GAQL client
-  - `gbp.py` — Google Business Profile client (3 base URLs)
-  - `merchant.py` — Merchant Center client
-  - `ga4.py` — GA4 Data API client
-  - `http.py` — HTTP helpers with auth headers
-  - `db.py` — SQLite connection manager
-  - `output.py` — table/JSON formatters
-  - `timeutil.py` — timezone-aware time helpers
-- `fetch_daily.py` — cron-friendly daily data fetcher
-- `generate_token.py` — OAuth token generator (4 scopes)
+```
+gads-cli/
+├── gads                     # Main CLI entry point (thin shim)
+├── gads_lib/
+│   ├── cli.py              # Click command groups and entry point
+│   ├── config.py           # Environment-driven configuration
+│   ├── auth.py             # OAuth credential management + refresh
+│   ├── ads.py              # Google Ads REST client + GAQL runner
+│   ├── gbp.py              # GBP client (3 base URLs: account mgmt, business info, legacy v4)
+│   ├── merchant.py         # Merchant Center REST client
+│   ├── ga4.py              # GA4 Data API client
+│   ├── http.py             # HTTP helpers with auth headers
+│   ├── db.py               # SQLite connection manager
+│   ├── output.py           # Table/JSON formatting
+│   └── timeutil.py         # Timezone-aware time helpers
+├── fetch_daily.py          # Cron-friendly daily data fetcher
+├── generate_token.py       # Interactive OAuth token generator
+├── pyproject.toml          # Package metadata
+└── README.md, CLAUDE.md    # Documentation
+```
 
-## Key Patterns
+**REST API design:** The CLI uses Google's REST APIs directly (`requests` + `google-auth`), NOT the Python client library. This keeps dependencies minimal and makes debugging straightforward.
 
-- Every command supports `--json` for structured output
-- All write operations go through the changelog (`gads log`)
-- Snapshots should be taken before mutations (`gads snapshot`)
-- Agent enforcement via `GADS_ENFORCE_CALLER=1` restricts CLI to a named agent
-- Google Ads API uses REST directly (no protobuf, no client library)
-- GBP uses 3 different base URLs (account management, business info, legacy v4)
+## Known Gotchas
+
+### Google Ads API
+
+1. **Developer token is absolutely required** — without it, every Ads API call fails immediately. GBP/MC/GA4 don't need it.
+
+2. **Tilde (~) in resource names for ad group criteria** — resource names use tilde format: `customers/{CID}/adGroupCriteria/{adGroupId}~{criterionId}`. A slash instead of tilde causes 404 errors. Same pattern for campaign criteria.
+
+3. **mutateOperations key in batch operations** — use `{"mutateOperations": [...]}` not `{"operations": [...]}` for cross-resource mutations. Single-resource mutations use `"operations"`.
+
+4. **Sitelink finalUrls placement** — when creating a sitelink asset, `finalUrls` must be at the top level of the create object, NOT nested inside `sitelinkAsset`. Nesting causes silent URL drops.
+
+5. **Customer Match uploads and April 2026 deprecation** — starting April 1, 2026, `OfflineUserDataJobService` uploads fail if your token has never sent a successful Customer Match request. Pre-upload before that date or switch to Data Manager API.
+
+6. **Asset creation is two-step** — create the asset via `assets:mutate`, then link it to the campaign via `campaignAssets:mutate`. Cannot do both in one call.
+
+7. **Keyword special characters** — endpoints like `generateKeywordIdeas` reject keywords with `! @ % , * '` characters. Always sanitize input.
+
+8. **addyInfo with empty names in Customer Match** — sending `{"addressInfo": {"countryCode": "AE"}}` with no valid names is silently dropped. Validate names before including addressInfo.
+
+### GBP
+
+**Three different base URLs:**
+- `mybusinessaccountmanagement.googleapis.com` (v1) — accounts, locations
+- `mybusinessbusinessinformation.googleapis.com` (v1) — location details, hours, attributes
+- `mybusiness.googleapis.com` (v4, legacy) — reviews, media, posts, Q&A
+
+Each endpoint must use its correct base URL or requests fail.
+
+### Database
+
+- **Append-only:** SQLite tables for campaigns, ad groups, keywords, and performance metrics are append-only. No deletions. Use `gads refresh` to pull fresh data; old rows stay.
+- **Schema:** Run `python -m gads_lib.db init` to create tables if missing.
+
+### Time and Currency
+
+- **No same-day data:** Google Ads has 24-48h attribution lag. Never analyze today's performance — use yesterday or earlier.
+- **All costs in configured currency:** Default is USD. Set `GADS_CURRENCY=AED` if working in AED. All cost_micros from the API are already in that currency.
+
+## CLI Usage Examples
+
+```bash
+# Verify setup
+./gads doctor
+./gads auth status --json
+
+# Query campaigns
+./gads query "SELECT campaign.name, campaign.status FROM campaign"
+./gads campaign list
+./gads campaign list --json
+
+# Performance from local database
+./gads perf --days 7
+./gads perf --campaign "my-campaign" --json
+
+# Refresh local database from API
+./gads refresh --days 3
+./gads refresh --days 7 --config --push
+
+# Snapshots (save config before mutations)
+./gads snapshot pre-budget-change --save-file
+./gads snapshot baseline
+
+# Changelog
+./gads log "budget_change" "PMax 25 → 30 AED" --reason "strong cpa"
+./gads log "paused_keywords" "15 low-intent keywords" --campaign "Search - Tesla"
+
+# Keyword research (requires Standard access)
+./gads keyword ideas --keywords "tesla parts" --language en --geo AE
+./gads keyword forecast --keywords "tesla parts" --language en
+
+# Customer Match upload (deprecated April 2026)
+./gads audience upload contacts.csv --list-name "Website Visitors" --create-if-missing
+
+# Google Business Profile
+./gads gbp accounts
+./gads gbp locations --account accounts/123456789
+./gads gbp reviews locations/987654321
+./gads gbp reply-review accounts/123/locations/456/reviews/789 "Thank you for your review!"
+
+# Merchant Center
+./gads merchant account
+./gads merchant status
+./gads merchant products --limit 50
+
+# GA4 reporting
+./gads ga4 metadata
+./gads ga4 report --dimensions date,country --metrics activeUsers,sessions --start 7daysAgo
+./gads ga4 realtime --dimensions city --metrics activeUsers
+```

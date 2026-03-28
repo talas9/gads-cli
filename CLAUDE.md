@@ -21,18 +21,20 @@ python generate_token.py
 | Group | Subcommands | Purpose | Needs dev token? |
 |-------|-----------|---------|-----------------|
 | `auth` | `status`, `setup`, `login`, `revoke`, `test` | Credential management and diagnostics | No |
-| `campaign` | `list`, `status`, `perf`, `budget` | Campaign management and performance | Yes |
+| `campaign` | `list`, `status`, `budget`, `perf` | Campaign management and performance | Yes |
 | `adgroup` | `list`, `status`, `create` | Ad group management | Yes |
-| `ad` | (aliases `ad`) | Ad management | Yes |
-| `keyword` | `list`, `add`, `remove`, `negative`, `search-terms`, `ideas`, `forecast` | Keyword research and management | Yes |
-| `asset` | (images, sitelinks, callouts) | Asset management | Yes |
-| `conversion` | `list`, `create`, `tag`, `perf`, `upload` | Conversion tracking | Yes |
-| `audience` | `list`, `create`, `upload`, `job-status` | Audience and user list management | Yes |
-| `report` | `geo`, `hourly`, `devices`, `search-terms` | Specialized performance reports | Yes |
+| `ad` | `list`, `status`, `perf` | Ad management and ad-level metrics | Yes |
+| `keyword` | `list`, `add`, `remove`, `negative`, `search-terms`, `ideas`★, `forecast`★ | Keyword research and management | Yes |
+| `asset` | `list`, `sitelink`, `callout`, `call` | Asset management and extensions (two-step creation) | Yes |
+| `conversion` | `list`, `create`, `tag`, `perf`, `upload` | Conversion tracking and offline upload | Yes |
+| `audience` | `list`, `create`, `upload`, `job-status` | Customer Match lists and CSV upload | Yes |
+| `report` | `geo`, `hourly`, `devices`, `search-terms` | Specialized performance breakdowns | Yes |
 | `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply` | Google Business Profile management | No |
 | `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center product management | No |
 | `ga4` | `report`, `realtime`, `metadata` | Google Analytics 4 reporting | No |
-| Top-level | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `doctor` | GAQL queries, syncing, snapshots, and diagnostics | Yes (except `doctor`) |
+| Top-level | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor`, `mutate`, `batch-mutate` | GAQL queries, syncing, snapshots, generic mutations | Yes (except `doctor`) |
+
+> ★ Requires Standard Access developer token
 
 ## Authentication Requirements by Service
 

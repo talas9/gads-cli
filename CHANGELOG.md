@@ -2,49 +2,90 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.0] - 2026-03-28
+
+### Changed
+- README: accurate access level documentation (Test/Explorer/Basic/Standard)
+- README: Features table now shows all 65 commands across 14 groups
+- README: Command Requirements table shows auth needs per command
+- CLAUDE.md: AI-agent-friendly reference with full command taxonomy
+- CLAUDE.md: GAQL patterns, known gotchas, architecture overview
+
+### Added
+- CI pipeline (`.github/workflows/ci.yml`): Python 3.10-3.13 × Ubuntu + macOS
+- CI: syntax check, import verification, secret scanning, version validation
+- April 2026 Customer Match deprecation warning in docs
+
+## [3.1.0] - 2026-03-27
+
+### Added
+- `audience create` — create CRM-based Customer Match user lists
+- `audience upload` — full CSV upload pipeline (phone normalization, name validation, SHA-256 hashing, consent, batch retry with 429 backoff)
+- `audience job-status` — check Customer Match upload job status and match rate
+- `ads.py`: `audience_find_list()`, `audience_create_list()`, `audience_upload_csv()`
+- Phone normalization for UAE formats (05X, 5X, 971X, 00971X, +971X)
+- Name validation (`is_valid_name`) — rejects companies, garbage, special chars
+
+## [3.0.0] - 2026-03-27
+
+### Added
+- **50+ new commands** across 10 new groups
+- `campaign list`, `status`, `budget`, `perf` — campaign management
+- `adgroup list`, `status`, `create` — ad group management
+- `ad list`, `status`, `perf` — ad management with creatives
+- `keyword list`, `add`, `remove`, `negative`, `search-terms`, `ideas`, `forecast` — keyword management and research
+- `asset list`, `sitelink`, `callout`, `call` — asset management with two-step extension creation
+- `conversion list`, `create`, `tag`, `perf`, `upload` — conversion tracking and offline upload
+- `audience list` — user list / audience listing
+- `report geo`, `hourly`, `devices`, `search-terms` — specialized reports
+- `mutate`, `batch-mutate` — generic escape hatches for any API mutation
+- `accounts` — list accessible Google Ads accounts
+- `ads.py`: `ads_mutate()`, `ads_batch_mutate()`, `ads_search()`, `ads_upload_click_conversions()`, `generate_keyword_ideas()`, `generate_keyword_forecast()`, `sanitize_keyword()`
+- Mutation safety: `--dry-run`, `--yes`, auto-changelog logging, caller enforcement
+
+### Changed
+- Repo renamed: `google-business-cli` → `gads-cli`
+- All internal references updated to `gads-cli`
+
+## [2.2.0] - 2026-03-27
+
+### Added
+- Scope-aware configuration: auto-detects project vs global (`~/.config/gads/`)
+- `auth setup` wizard detects scope and writes `.env` to correct location
+- Currency step in setup wizard
+- Developer token access level guide in setup wizard (Test/Basic/Standard + MCC requirement)
+
+### Fixed
+- Global pip install now uses `~/.config/gads/` for credentials/data/snapshots
+- `auth setup` no longer writes to site-packages directory
+
 ## [2.1.0] - 2026-03-27
 
 ### Added
-- **`GADS_CURRENCY`** env var for configurable currency (ISO 4217, default: USD)
-- **Dynamic versioning**: `__version__` in `gads_lib/__init__.py` is the single source of truth
-- Currency shown in `doctor` and `auth status` output
+- `GADS_CURRENCY` env var (ISO 4217, default: USD)
+- Dynamic versioning from `gads_lib.__version__`
 
 ### Changed
-- CLI logic moved into `gads_lib/cli.py` — proper Python module, pip install works correctly
-- `gads` root script is now a thin shim importing from `gads_lib.cli`
-- `pyproject.toml` reads version dynamically from `gads_lib.__version__`
-- DB columns: `cost_aed` → `cost`, `budget_aed` → `budget` (generic, currency-agnostic)
+- CLI logic moved into `gads_lib/cli.py` — proper pip install
+- DB columns: `cost_aed` → `cost`, `budget_aed` → `budget`
 
 ### Fixed
-- `pip install` now works — was broken by invalid build backend and missing CLI module
+- `pip install` broken by invalid build backend and missing CLI module
 
 ## [2.0.0] - 2026-03-26
 
 ### Added
-- **Google Business Profile commands**: `gbp accounts`, `gbp locations`, `gbp location`, `gbp reviews`, `gbp reply-review`, `gbp delete-reply`
-- **Google Merchant Center commands**: `merchant account`, `merchant status`, `merchant products`, `merchant product-status`, `merchant feeds`, `merchant shipping`, `merchant returns`
-- **Google Analytics 4 commands**: `ga4 metadata`, `ga4 report`, `ga4 realtime`
-- **Modular library** (`gads_lib/`): Separate modules for auth, ads, gbp, merchant, ga4, http, db, output, config, timeutil
-- **`doctor` command**: Validates credentials, API access, and configuration
-- **`auth status` command**: Shows credential status (never prints secrets)
-- **Agent enforcement**: Optional caller restriction via `GADS_ENFORCE_CALLER`
-- **`fetch_daily.py`**: Standalone cron-friendly daily data fetcher
-- **`generate_token.py`**: OAuth token generator with all 4 scopes
-- **Full environment configuration**: All settings via `.env` — no hardcoded values
-- **`pyproject.toml`**: pip-installable package
-- **`--json` flag** on all commands for machine-readable output
-- **Shell wrapper** (`gads.sh`): Auto-loads `.env` before running CLI
+- Google Business Profile: `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`
+- Google Merchant Center: `merchant account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns`
+- Google Analytics 4: `ga4 metadata`, `report`, `realtime`
+- Modular library (`gads_lib/`), `doctor`, `auth status`, agent enforcement
+- `fetch_daily.py`, `generate_token.py`, `pyproject.toml`, `--json` on all commands
 
 ### Changed
-- All hardcoded account IDs, timezone, and paths replaced with environment variables
-- API version default updated to v19
-- Timezone handling uses IANA names (configurable via `GADS_TIMEZONE`)
-- Database path configurable via `GADS_DB_PATH`
+- All config via environment variables — zero hardcoded values
 
 ## [1.0.0] - 2026-02-11
 
 ### Added
-- Initial CLI with 6 commands: `query`, `log`, `snapshot`, `perf`, `config`, `refresh`
-- Google Ads GAQL query execution
-- SQLite-backed performance data and changelog
-- OAuth credential management
+- Initial CLI: `query`, `log`, `snapshot`, `perf`, `config`, `refresh`
+- Google Ads GAQL queries, SQLite database, OAuth credentials

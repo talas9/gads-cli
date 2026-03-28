@@ -11,21 +11,34 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 
 ## Features
 
-| Service | Commands | Description |
-|---------|----------|-------------|
-| **Google Ads** | `query`, `perf`, `config`, `refresh`, `snapshot`, `log` | GAQL queries, performance reports, campaign snapshots, changelog |
-| **Google Business Profile** | `gbp accounts`, `gbp locations`, `gbp reviews`, `gbp reply-review`, `gbp delete-reply` | Manage locations, reviews, and replies |
-| **Google Merchant Center** | `merchant account`, `merchant status`, `merchant products`, `merchant feeds`, `merchant shipping`, `merchant returns` | Product listings, feed management, diagnostics |
-| **Google Analytics (GA4)** | `ga4 report`, `ga4 realtime`, `ga4 metadata` | Traffic reports, real-time data, available dimensions/metrics |
+**65 commands** across 14 groups covering the full Google Ads operational surface:
 
-**Cross-cutting features:**
-- `--json` flag on every command for machine-readable output
-- `--help` on every command with full option documentation
-- `doctor` command to validate credentials and API access
-- SQLite database for offline queries and git-syncable data
-- Environment-based configuration — zero hardcoded values
-- Agent enforcement for multi-agent setups (optional)
-- Configurable timezone (IANA format)
+| Group | Commands | Description |
+|-------|----------|-------------|
+| **Core** | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor` | GAQL queries, local DB reports, campaign snapshots, changelog, account listing |
+| **Campaign** | `campaign list`, `status`, `budget`, `perf` | List, enable/pause, change budget, campaign-level metrics from API |
+| **Ad Group** | `adgroup list`, `status`, `create` | List, enable/pause, create ad groups |
+| **Ad** | `ad list`, `status`, `perf` | List ads with creatives, enable/pause, ad-level metrics |
+| **Keyword** | `keyword list`, `add`, `remove`, `negative`, `search-terms`, `ideas`★, `forecast`★ | Keyword management, search terms report, Keyword Planner research |
+| **Asset** | `asset list`, `sitelink`, `callout`, `call` | List assets, add sitelinks/callouts/call extensions (two-step creation) |
+| **Conversion** | `conversion list`, `create`, `tag`, `perf`, `upload` | Conversion actions, tracking tags, performance by action, offline upload |
+| **Audience** | `audience list`, `create`, `upload`, `job-status` | Customer Match user lists, CSV upload with SHA-256 hashing + consent |
+| **Report** | `report geo`, `hourly`, `devices`, `search-terms` | Geographic, hourly, device, and search term performance breakdowns |
+| **Mutate** | `mutate <type> <json>`, `batch-mutate <json>` | Generic escape hatch for any Google Ads API mutation |
+| **GBP** | `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply` | Google Business Profile management — no dev token needed |
+| **Merchant** | `merchant account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center diagnostics — no dev token needed |
+| **GA4** | `ga4 report`, `realtime`, `metadata` | Google Analytics 4 reporting — no dev token needed |
+| **Auth** | `auth status`, `setup`, `login`, `revoke`, `test` | Interactive setup wizard, OAuth flow, credential diagnostics |
+
+> ★ Requires Standard Access developer token
+
+**Cross-cutting:**
+- `--json` on every command for machine-readable output
+- `--dry-run` and `--yes` on all mutation commands
+- Auto-logging to changelog after successful mutations
+- Scope-aware config — auto-detects project (`./`) vs global (`~/.config/gads/`)
+- Agent caller enforcement for multi-agent architectures (optional)
+- Configurable timezone (IANA) and currency (ISO 4217)
 
 ## Install
 

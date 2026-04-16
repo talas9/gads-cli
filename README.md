@@ -31,7 +31,7 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 | **GBP** | `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily` | Google Business Profile management + performance analytics |
 | **GSC** | `gsc sites`, `queries`, `pages`, `performance` | Google Search Console — search queries, pages, daily performance |
 | **Merchant** | `merchant account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center diagnostics — no dev token needed |
-| **GA4** | `ga4 report`, `realtime`, `metadata` | Google Analytics 4 reporting — no dev token needed |
+| **GA4** | `ga4 report`, `realtime`, `metadata`, `key-events list/create/bulk/delete` | Google Analytics 4 reporting + key-event (conversion) management — no dev token needed |
 | **Auth** | `auth status`, `setup`, `login`, `revoke`, `test` | Interactive setup wizard, OAuth flow, credential diagnostics |
 
 > ★ Requires Standard Access developer token
@@ -229,6 +229,14 @@ gads merchant returns                # Return policy
 gads ga4 metadata                    # Available dimensions/metrics
 gads ga4 report -d date -m activeUsers,sessions --start 7daysAgo
 gads ga4 realtime -d country -m activeUsers
+
+# Key events (the GA4 replacement for "conversions"). List is read-only
+# (analytics.readonly). Create / bulk / delete need the analytics.edit
+# scope — regenerate the token via tools/generate_token.py if missing.
+gads ga4 key-events list
+gads ga4 key-events create whatsapp_click
+gads ga4 key-events bulk "whatsapp_click,phone_click,form_submit,add_to_cart"
+gads ga4 key-events delete whatsapp_click --yes
 ```
 
 ### Automation (cron)

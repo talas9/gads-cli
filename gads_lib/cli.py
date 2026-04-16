@@ -38,6 +38,10 @@ from gads_lib import (
     ga4_get_metadata,
     ga4_run_realtime_report,
     ga4_run_report,
+    list_key_events,
+    create_key_event,
+    delete_key_event,
+    VALID_COUNTING_METHODS,
     gbp_delete_reply,
     gbp_get_location,
     gbp_list_accounts,
@@ -1581,6 +1585,134 @@ def ga4_realtime_cmd(property_id, dimensions, metrics, as_json):
         rows.append(r)
     print_table(rows, dim_h + met_h)
     click.echo(f"\n  {len(rows)} row(s)")
+
+
+# ── GA4 Key Events (Admin API) ───────────────────────────────
+
+_COUNTING_CHOICES = ["once-per-session", "once-per-event"]
+
+
+def _counting_to_api(value):
+    """Map CLI-friendly kebab value to the API enum."""
+    return {
+        "once-per-session": "ONCE_PER_SESSION",
+        "once-per-event": "ONCE_PER_EVENT",
+    }[value]
+
+
+@ga4.group("key-events")
+def ga4_key_events():
+    """Manage GA4 key events (conversions). Write ops need analytics.edit scope."""
+    pass
+
+
+@ga4_key_events.command("list")
+@click.option("--property", "property_id", default=None, help="GA4 property id (default: GOOGLE_GA4_PROPERTY_ID)")
+@click.option("--json", "as_json", is_flag=True)
+def ga4_key_events_list_cmd(property_id, as_json):
+    """List all key events on the property."""
+    enforce_allowed_caller()
+    events = list_key_events(property_id, get_credentials())
+    if as_json:
+        return print_json(events)
+    rows = [
+        {
+            "event_name": e.get("eventName", ""),
+            "counting_method": e.get("countingMethod", ""),
+            "custom": e.get("custom", False),
+            "create_time": e.get("createTime", ""),
+        }
+        for e in events
+    ]
+    print_table(rows, ["event_name", "counting_method", "custom", "create_time"])
+    click.echo(f"\n  {len(rows)} key event(s)")
+
+
+@ga4_key_events.command("create")
+@click.argument("event_name")
+@click.option(
+    "--counting-method",
+    type=click.Choice(_COUNTING_CHOICES, case_sensitive=False),
+    default="once-per-session",
+    show_default=True,
+)
+@click.option("--property", "property_id", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def ga4_key_events_create_cmd(event_name, counting_method, property_id, as_json):
+    """Mark a single event as a key event. Idempotent."""
+    enforce_allowed_caller()
+    cm = _counting_to_api(counting_method.lower())
+    result = create_key_event(property_id, get_credentials(), event_name, counting_method=cm)
+    already = result.get("_already_exists", False)
+    if as_json:
+        return print_json(result)
+    if already:
+        click.secho(f"  = {event_name} already a key event", fg="yellow")
+    else:
+        click.secho(f"  \u2713 {event_name} marked as key event ({cm})", fg="green")
+
+
+@ga4_key_events.command("bulk")
+@click.argument("event_names")
+@click.option(
+    "--counting-method",
+    type=click.Choice(_COUNTING_CHOICES, case_sensitive=False),
+    default="once-per-session",
+    show_default=True,
+)
+@click.option("--property", "property_id", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def ga4_key_events_bulk_cmd(event_names, counting_method, property_id, as_json):
+    """Mark several events as key events in one call. EVENT_NAMES is comma-separated.
+
+    Idempotent — existing events are reported and skipped, not errored on.
+    """
+    enforce_allowed_caller()
+    names = [n.strip() for n in event_names.split(",") if n.strip()]
+    if not names:
+        click.secho("  no event names provided", fg="red", err=True)
+        raise SystemExit(1)
+    cm = _counting_to_api(counting_method.lower())
+    creds = get_credentials()
+    results = []
+    for name in names:
+        try:
+            data = create_key_event(property_id, creds, name, counting_method=cm)
+            status = "exists" if data.get("_already_exists") else "created"
+            results.append({"event_name": name, "status": status, "counting_method": cm})
+            if not as_json:
+                tag = "=" if status == "exists" else "\u2713"
+                colour = "yellow" if status == "exists" else "green"
+                click.secho(f"  {tag} {name:25s} {status}", fg=colour)
+        except SystemExit as exc:
+            results.append({"event_name": name, "status": "error", "error": str(exc)})
+            if not as_json:
+                click.secho(f"  \u2717 {name:25s} {exc}", fg="red", err=True)
+    if as_json:
+        return print_json(results)
+    created = sum(1 for r in results if r["status"] == "created")
+    exists = sum(1 for r in results if r["status"] == "exists")
+    errors = sum(1 for r in results if r["status"] == "error")
+    click.echo(f"\n  {created} created, {exists} already existed, {errors} error(s)")
+
+
+@ga4_key_events.command("delete")
+@click.argument("event_name")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+@click.option("--property", "property_id", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def ga4_key_events_delete_cmd(event_name, yes, property_id, as_json):
+    """Remove a key event (the underlying event keeps flowing; it just stops being a conversion)."""
+    enforce_allowed_caller()
+    if not yes:
+        click.confirm(f"  Remove key event '{event_name}'?", abort=True)
+    removed = delete_key_event(property_id, get_credentials(), event_name)
+    if as_json:
+        return print_json({"event_name": event_name, "removed": removed})
+    if removed:
+        click.secho(f"  \u2713 {event_name} removed as key event", fg="green")
+    else:
+        click.secho(f"  = {event_name} was not a key event (nothing to do)", fg="yellow")
 
 
 # ── New command groups ───────────────────────────────────────

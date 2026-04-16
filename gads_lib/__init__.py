@@ -61,6 +61,10 @@ from .ga4 import (
     ga4_get_metadata,
     ga4_run_realtime_report,
     ga4_run_report,
+    list_key_events,
+    create_key_event,
+    delete_key_event,
+    VALID_COUNTING_METHODS,
 )
 from .output import flatten, print_json, print_table
 from .timeutil import now_local, today_local

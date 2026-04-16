@@ -2,6 +2,10 @@
 
 Unified Google platform CLI for Google Ads, Google Business Profile, Google Merchant Center, and GA4. Built for AI agents — all commands support `--json` and `--help`.
 
+## Related skill
+
+When this CLI is used inside the **talas-ads** workspace, a companion Claude Code skill lives at [`../skills/google-ads-management/SKILL.md`](../skills/google-ads-management/SKILL.md) (symlinked into `~/.claude/skills/`). That skill layers Talas-specific operational knowledge on top of the raw CLI: campaign management workflows, mutation safety (snapshot → mutate → log), cross-channel analysis across Ads + GBP + Merchant Center + GA4, and the business rules for Talas ad copy (PARTS ONLY, Tesla-specific language, branch-specific phone numbers QZ3 / IND4 / SJA, landing-page `?branch=` parameter, etc.). This file (`CLAUDE.md`) stays focused on the generic CLI contract; reach for the skill when the caller is operating the Talas account specifically.
+
 ## Quick Start
 
 ```bash
@@ -32,7 +36,7 @@ python generate_token.py
 | `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily` | Google Business Profile management + performance analytics | No |
 | `gsc` | `sites`, `queries`, `pages`, `performance` | Google Search Console — queries, pages, daily performance | No |
 | `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center product management | No |
-| `ga4` | `report`, `realtime`, `metadata` | Google Analytics 4 reporting | No |
+| `ga4` | `report`, `realtime`, `metadata`, `key-events` (`list`/`create`/`bulk`/`delete`) | Google Analytics 4 reporting + key-event (conversion) management | No |
 | Top-level | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor`, `mutate`, `batch-mutate` | GAQL queries, syncing, snapshots, generic mutations | Yes (except `doctor`) |
 
 > ★ Requires Standard Access developer token
@@ -58,7 +62,10 @@ python generate_token.py
 
 ### GA4 Commands
 - **Developer token:** NOT needed
-- **OAuth scopes:** `analytics.readonly` scope (some reports need `analyticsdata.googleapis.com` enabled)
+- **OAuth scopes:**
+  - `analytics.readonly` — for `report`, `realtime`, `metadata`, and `key-events list`
+  - `analytics.edit` — required for `key-events create`, `key-events bulk`, `key-events delete` (uses the GA4 Admin API). The project's `tools/generate_token.py` and `gads-cli/generate_token.py` both include this scope already; if you see `403 Forbidden` on write calls, regenerate the token.
+- **APIs to enable:** GA4 Data API (`analyticsdata.googleapis.com`) for reporting; GA4 Admin API (`analyticsadmin.googleapis.com`) for key events.
 - **Credentials:** `GOOGLE_GA4_PROPERTY_ID`
 
 ## Common GAQL Patterns
@@ -249,4 +256,10 @@ Each endpoint must use its correct base URL or requests fail.
 ./gads ga4 metadata
 ./gads ga4 report --dimensions date,country --metrics activeUsers,sessions --start 7daysAgo
 ./gads ga4 realtime --dimensions city --metrics activeUsers
+
+# GA4 key events (conversions). Write ops need analytics.edit scope.
+./gads ga4 key-events list
+./gads ga4 key-events create whatsapp_click
+./gads ga4 key-events bulk "whatsapp_click,phone_click,form_submit,add_to_cart,begin_checkout,add_payment_info"
+./gads ga4 key-events delete whatsapp_click --yes
 ```

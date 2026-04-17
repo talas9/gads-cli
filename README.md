@@ -24,7 +24,7 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 | **Ad** | `ad list`, `status`, `perf` | List ads with creatives, enable/pause, ad-level metrics |
 | **Keyword** | `keyword list`, `add`, `remove`, `negative`, `search-terms`, `ideas`★, `forecast`★ | Keyword management, search terms report, Keyword Planner research |
 | **Asset** | `asset list`, `sitelink`, `callout`, `call` | List assets, add sitelinks/callouts/call extensions (two-step creation) |
-| **Conversion** | `conversion list`, `create`, `tag`, `perf`, `upload` | Conversion actions, tracking tags, performance by action, offline upload |
+| **Conversion** | `conversion list`, `create`, `set-primary`, `tag`, `perf`, `upload` | Conversion actions, tracking tags, Primary/Secondary toggling, performance by action, offline upload |
 | **Audience** | `audience list`, `create`, `upload`, `job-status` | Customer Match user lists, CSV upload with SHA-256 hashing + consent |
 | **Report** | `report geo`, `hourly`, `devices`, `search-terms` | Geographic, hourly, device, and search term performance breakdowns |
 | **Mutate** | `mutate <type> <json>`, `batch-mutate <json>` | Generic escape hatch for any Google Ads API mutation |
@@ -170,6 +170,8 @@ gads conversion list                 # All conversion actions
 gads conversion perf --days 7        # Performance by conversion action
 gads conversion tag 12345            # Get tracking snippet
 gads conversion create "My Action" --type WEBPAGE
+gads conversion set-primary 12345 --primary          # Promote to Primary (drives Smart Bidding)
+gads conversion set-primary 12345 --secondary        # Demote to Secondary (observation-only)
 gads conversion upload --gclid xxx --action-id yyy --time "2026-03-27T12:00:00"
 ```
 

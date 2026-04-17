@@ -2314,6 +2314,119 @@ def conversion_create(name, conv_type, category, dry_run, yes, as_json):
         return print_json(result)
     click.secho(f"✓ Created conversion action '{name}'", fg="green")
 
+@conversion_group.command("set-primary")
+@click.argument("action")
+@click.option("--primary", "make_primary", flag_value="primary", help="Mark the conversion action as Primary (drives Smart Bidding).")
+@click.option("--secondary", "make_primary", flag_value="secondary", help="Mark the conversion action as Secondary (observation-only; reported but not bid on).")
+@click.option("--customer-id", "customer_id_opt", default=None, help="Customer ID to target. Defaults to GOOGLE_ADS_CUSTOMER_ID.")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def conversion_set_primary(action, make_primary, customer_id_opt, dry_run, yes, as_json):
+    """Toggle a conversion action's primary_for_goal flag (Primary ↔ Secondary).
+
+    ACTION may be a full resource_name (customers/.../conversionActions/123)
+    or just the numeric conversion_action ID.
+    """
+    # Require exactly one of --primary / --secondary
+    if make_primary not in ("primary", "secondary"):
+        click.secho("✗ Must specify exactly one of --primary or --secondary.", fg="red", err=True)
+        raise SystemExit(2)
+    target_primary = (make_primary == "primary")
+
+    # Resolve customer ID (flag > env default from config)
+    cid = (customer_id_opt or CUSTOMER_ID or "").strip()
+    if not cid:
+        click.secho("✗ No customer ID — pass --customer-id or set GOOGLE_ADS_CUSTOMER_ID.", fg="red", err=True)
+        raise SystemExit(1)
+
+    # Normalize action → resource_name + numeric id
+    action = action.strip()
+    if action.startswith("customers/"):
+        resource_name = action
+        try:
+            action_id = resource_name.rsplit("/", 1)[-1]
+        except Exception:
+            action_id = ""
+    elif action.isdigit():
+        action_id = action
+        resource_name = f"customers/{cid}/conversionActions/{action_id}"
+    else:
+        click.secho(
+            f"✗ Unrecognised ACTION '{action}'. Expected a numeric ID or a full "
+            f"resource_name like customers/{cid}/conversionActions/12345.",
+            fg="red", err=True,
+        )
+        raise SystemExit(2)
+
+    creds = get_credentials()
+
+    # Look up current state
+    results = run_gaql(creds, f"""
+        SELECT conversion_action.resource_name, conversion_action.name,
+               conversion_action.id, conversion_action.primary_for_goal
+        FROM conversion_action
+        WHERE conversion_action.resource_name = '{resource_name}'""")
+    if not results:
+        click.secho(f"✗ Conversion action not found: {resource_name}", fg="red", err=True)
+        raise SystemExit(1)
+    ca = results[0].get("conversionAction", {})
+    before_primary = bool(ca.get("primaryForGoal", False))
+    before_state = {
+        "name": ca.get("name", ""),
+        "resource_name": ca.get("resourceName", resource_name),
+        "primary_for_goal": before_primary,
+    }
+
+    new_label = "Primary" if target_primary else "Secondary"
+    old_label = "Primary" if before_primary else "Secondary"
+
+    if before_primary == target_primary:
+        click.secho(
+            f"  No change needed — '{before_state['name']}' is already {new_label}.",
+            fg="yellow",
+        )
+        if as_json:
+            return print_json({"before": before_state, "after": before_state, "changed": False})
+        return
+
+    enforce_allowed_caller()
+
+    summary = f"conversion action {action_id} '{before_state['name']}': {old_label} → {new_label}"
+    if not _confirm_and_log(summary, "set primary_for_goal", dry_run, yes):
+        if as_json:
+            return print_json({"before": before_state, "after": None, "dry_run": True})
+        return
+
+    op = {
+        "update": {"resourceName": resource_name, "primaryForGoal": target_primary},
+        "updateMask": "primary_for_goal",
+    }
+    result = ads_mutate(creds, "conversionActions", [op])
+    _auto_log("conversion_set_primary", summary)
+
+    # Re-query for confirmed after-state
+    results_after = run_gaql(creds, f"""
+        SELECT conversion_action.resource_name, conversion_action.name,
+               conversion_action.id, conversion_action.primary_for_goal
+        FROM conversion_action
+        WHERE conversion_action.resource_name = '{resource_name}'""")
+    after_state = before_state
+    if results_after:
+        ca2 = results_after[0].get("conversionAction", {})
+        after_state = {
+            "name": ca2.get("name", ""),
+            "resource_name": ca2.get("resourceName", resource_name),
+            "primary_for_goal": bool(ca2.get("primaryForGoal", False)),
+        }
+
+    if as_json:
+        return print_json({"before": before_state, "after": after_state, "result": result})
+    click.secho(f"✓ {before_state['name']} ({action_id}): {old_label} → {new_label}", fg="green")
+    click.echo(f"  before: primary_for_goal={before_state['primary_for_goal']}")
+    click.echo(f"  after:  primary_for_goal={after_state['primary_for_goal']}")
+
+
 @conversion_group.command("tag")
 @click.argument("conversion_id")
 @click.option("--json", "as_json", is_flag=True)

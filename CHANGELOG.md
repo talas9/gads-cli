@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.1] - 2026-06-23
+### Fixed
+- `--json` mode: classified access errors (API_NOT_ENABLED, MERCHANT_NOT_REGISTERED, INSUFFICIENT_SCOPE, PERMISSION_DENIED) now emit a parseable JSON envelope on STDOUT instead of printing human-readable advisory text to STDERR with empty STDOUT. Exit code 5 preserved. The interactive gcloud-enable offer is suppressed in JSON mode.
+
 ## [3.8.0] - 2026-06-23
 
 ### Added

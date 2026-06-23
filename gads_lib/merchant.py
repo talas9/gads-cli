@@ -15,7 +15,7 @@ MA_DATASOURCES = "https://merchantapi.googleapis.com/datasources/v1"
 
 
 # KB: kb/merchant-api.md § accounts | https://developers.google.com/merchant/api/reference/rest/accounts_v1beta/accounts/get
-def mc_get_account(creds):
+def mc_get_account(creds, as_json=False):
     """Fetch the Merchant Center account.
 
     Response shape (single object):
@@ -31,11 +31,12 @@ def mc_get_account(creds):
         "GET",
         f"{MA_ACCOUNTS}/accounts/{MERCHANT_CENTER_ID}",
         headers=get_bearer_headers(creds),
+        as_json=as_json,
     )
 
 
 # KB: kb/merchant-api.md § account-issues | https://developers.google.com/merchant/api/reference/rest/accounts_v1beta/accounts.issues/list
-def mc_get_account_status(creds):
+def mc_get_account_status(creds, as_json=False):
     """List account-level issues for the Merchant Center account.
 
     In Merchant API v1, account status is surfaced as a paginated list of
@@ -56,11 +57,12 @@ def mc_get_account_status(creds):
         f"{MA_ACCOUNTS}/accounts/{MERCHANT_CENTER_ID}/issues",
         headers=get_bearer_headers(creds),
         params=params,
+        as_json=as_json,
     )
 
 
 # KB: kb/merchant-api.md § products | https://developers.google.com/merchant/api/reference/rest/products_v1beta/accounts.products/list
-def mc_list_products(creds, max_results=50, page_token=None):
+def mc_list_products(creds, max_results=50, page_token=None, as_json=False):
     """List products in the Merchant Center account.
 
     Response shape:
@@ -90,11 +92,12 @@ def mc_list_products(creds, max_results=50, page_token=None):
         f"{MA_PRODUCTS}/accounts/{MERCHANT_CENTER_ID}/products",
         headers=get_bearer_headers(creds),
         params=params,
+        as_json=as_json,
     )
 
 
 # KB: kb/merchant-api.md § products | https://developers.google.com/merchant/api/reference/rest/products_v1beta/accounts.products/list
-def mc_list_product_statuses(creds, max_results=50, page_token=None):
+def mc_list_product_statuses(creds, max_results=50, page_token=None, as_json=False):
     """List product statuses for the Merchant Center account.
 
     NOTE: Merchant API v1 has NO standalone productstatuses endpoint.
@@ -114,11 +117,12 @@ def mc_list_product_statuses(creds, max_results=50, page_token=None):
         f"{MA_PRODUCTS}/accounts/{MERCHANT_CENTER_ID}/products",
         headers=get_bearer_headers(creds),
         params=params,
+        as_json=as_json,
     )
 
 
 # KB: kb/merchant-api.md § datasources | https://developers.google.com/merchant/api/reference/rest/datasources_v1beta/accounts.dataSources/list
-def mc_list_datafeeds(creds):
+def mc_list_datafeeds(creds, as_json=False):
     """List data sources (formerly datafeeds) in the Merchant Center account.
 
     Response shape:
@@ -135,11 +139,12 @@ def mc_list_datafeeds(creds):
         "GET",
         f"{MA_DATASOURCES}/accounts/{MERCHANT_CENTER_ID}/dataSources",
         headers=get_bearer_headers(creds),
+        as_json=as_json,
     )
 
 
 # KB: kb/merchant-api.md § shipping | https://developers.google.com/merchant/api/reference/rest/accounts_v1beta/accounts.shippingSettings/get
-def mc_get_shipping(creds):
+def mc_get_shipping(creds, as_json=False):
     """Fetch shipping settings for the Merchant Center account.
 
     Response shape (single ShippingSettings object):
@@ -155,11 +160,12 @@ def mc_get_shipping(creds):
         "GET",
         f"{MA_ACCOUNTS}/accounts/{MERCHANT_CENTER_ID}/shippingSettings",
         headers=get_bearer_headers(creds),
+        as_json=as_json,
     )
 
 
 # KB: kb/merchant-api.md § return-policies | https://developers.google.com/merchant/api/reference/rest/accounts_v1beta/accounts.onlineReturnPolicies/list
-def mc_get_return_policy(creds):
+def mc_get_return_policy(creds, as_json=False):
     """List online return policies for the Merchant Center account.
 
     Response shape:
@@ -176,4 +182,5 @@ def mc_get_return_policy(creds):
         f"{MA_ACCOUNTS}/accounts/{MERCHANT_CENTER_ID}/onlineReturnPolicies",
         headers=get_bearer_headers(creds),
         params=params,
+        as_json=as_json,
     )

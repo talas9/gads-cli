@@ -1024,7 +1024,7 @@ def refresh(days, with_config, push, as_json):
 def gbp_accounts(as_json):
     """List accessible Business Profile accounts."""
     enforce_allowed_caller()
-    data = gbp_list_accounts(get_credentials())
+    data = gbp_list_accounts(get_credentials(), as_json=as_json)
     accounts = data.get("accounts", [])
     if as_json: return print_json(accounts)
     rows = [{"name": a.get("name",""), "account_name": a.get("accountName",""),
@@ -1038,7 +1038,8 @@ def gbp_locations(account_name, as_json):
     """List locations for an account."""
     enforce_allowed_caller()
     data = gbp_list_locations(get_credentials(), account_name,
-        read_mask="name,title,storeCode,phoneNumbers,websiteUri,languageCode,storefrontAddress,metadata")
+        read_mask="name,title,storeCode,phoneNumbers,websiteUri,languageCode,storefrontAddress,metadata",
+        as_json=as_json)
     locations = data.get("locations", [])
     if as_json: return print_json(locations)
     rows = []
@@ -1057,7 +1058,8 @@ def gbp_location(location_name, as_json):
     """Get one location detail."""
     enforce_allowed_caller()
     data = gbp_get_location(get_credentials(), location_name,
-        read_mask="name,title,storeCode,phoneNumbers,websiteUri,regularHours,specialHours,serviceArea,storefrontAddress,metadata,profile,labels,languageCode")
+        read_mask="name,title,storeCode,phoneNumbers,websiteUri,regularHours,specialHours,serviceArea,storefrontAddress,metadata,profile,labels,languageCode",
+        as_json=as_json)
     if as_json: return print_json(data)
     rows = [{"field": k, "value": v} for k, v in data.items() if not isinstance(v, (dict, list))]
     print_table(rows, ["field", "value"])
@@ -1068,7 +1070,7 @@ def gbp_location(location_name, as_json):
 def gbp_reviews(location_name, as_json):
     """List reviews for a location."""
     enforce_allowed_caller()
-    data = gbp_list_reviews(get_credentials(), location_name)
+    data = gbp_list_reviews(get_credentials(), location_name, as_json=as_json)
     reviews = data.get("reviews", [])
     if as_json: return print_json(reviews)
     rows = [{"name": r.get("name",""), "reviewer": ((r.get("reviewer") or {}).get("displayName")) or "",
@@ -1086,7 +1088,7 @@ def gbp_reviews(location_name, as_json):
 def gbp_batch_reviews_cmd(location_names, account_name, as_json):
     """Fetch reviews from multiple locations at once."""
     enforce_allowed_caller()
-    data = gbp_batch_get_reviews(get_credentials(), account_name, list(location_names))
+    data = gbp_batch_get_reviews(get_credentials(), account_name, list(location_names), as_json=as_json)
     if as_json:
         return print_json(data)
     for loc, reviews in data.items():
@@ -1106,7 +1108,7 @@ def gbp_batch_reviews_cmd(location_names, account_name, as_json):
 def gbp_local_posts_cmd(account_name, location_id, as_json):
     """List local posts for a GBP location."""
     enforce_allowed_caller()
-    data = gbp_list_local_posts(get_credentials(), account_name, location_id)
+    data = gbp_list_local_posts(get_credentials(), account_name, location_id, as_json=as_json)
     posts = data.get("localPosts", [])
     if as_json:
         return print_json(posts)
@@ -1139,7 +1141,7 @@ def gbp_create_post_cmd(account_name, location_id, summary, topic_type, cta_url,
         click.secho(f"  DRY RUN: would POST to accounts/{account_name}/locations/{location_id}/localPosts", fg="yellow")
         click.echo(f"  Body: {body}")
         return
-    data = gbp_create_local_post(get_credentials(), account_name, location_id, body)
+    data = gbp_create_local_post(get_credentials(), account_name, location_id, body, as_json=as_json)
     if as_json:
         return print_json(data)
     click.secho(f"  Created post: {data.get('name', '')}", fg="green")
@@ -1156,7 +1158,7 @@ def gbp_delete_post_cmd(account_name, location_id, post_id, yes, as_json):
     enforce_allowed_caller()
     if not yes:
         click.confirm(f"  Delete local post {post_id}?", abort=True)
-    data = gbp_delete_local_post(get_credentials(), account_name, location_id, post_id)
+    data = gbp_delete_local_post(get_credentials(), account_name, location_id, post_id, as_json=as_json)
     if as_json:
         return print_json(data or {"deleted": True, "post_id": post_id})
     click.secho(f"  Deleted post {post_id}", fg="green")
@@ -1245,12 +1247,12 @@ def gbp_perf_all(days, metrics, as_json):
     end = _today_date() - timedelta(days=1)
     start = end - timedelta(days=days - 1)
 
-    accts = gbp_list_accounts(creds)
+    accts = gbp_list_accounts(creds, as_json=as_json)
     all_results = {}
     for acct in accts.get("accounts", []):
         if acct.get("type") != "LOCATION_GROUP":
             continue
-        locs = gbp_list_locations(creds, acct["name"], read_mask="name,title")
+        locs = gbp_list_locations(creds, acct["name"], read_mask="name,title", as_json=as_json)
         for loc in locs.get("locations", []):
             title = loc.get("title", loc["name"])
             click.echo(f"  Fetching {title}...", err=True)
@@ -1307,7 +1309,7 @@ def gbp_search_keywords(location, months, limit, as_json):
     while start_m < 1:
         start_m += 12
         start_y -= 1
-    keywords = gbp_search_keywords_monthly(creds, loc, (start_y, start_m), end_month, page_size=limit)
+    keywords = gbp_search_keywords_monthly(creds, loc, (start_y, start_m), end_month, page_size=limit, as_json=as_json)
     if as_json:
         return print_json(keywords)
     print_table(keywords[:limit], ["keyword", "impressions"])
@@ -1490,7 +1492,7 @@ def gsc():
 def gsc_sites_cmd(as_json):
     """List verified Search Console sites."""
     enforce_allowed_caller()
-    data = gsc_list_sites(get_credentials())
+    data = gsc_list_sites(get_credentials(), as_json=as_json)
     sites = data.get("siteEntry", [])
     if as_json:
         return print_json(sites)
@@ -1509,7 +1511,7 @@ def gsc_queries_cmd(site, days, limit, as_json):
     creds = get_credentials()
     end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
     start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
-    data = gsc_search_analytics(creds, site, start, end, dimensions=["query"], row_limit=limit)
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["query"], row_limit=limit, as_json=as_json)
     rows_raw = data.get("rows", [])
     if as_json:
         return print_json(rows_raw)
@@ -1531,7 +1533,7 @@ def gsc_pages_cmd(site, days, limit, as_json):
     creds = get_credentials()
     end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
     start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
-    data = gsc_search_analytics(creds, site, start, end, dimensions=["page"], row_limit=limit)
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["page"], row_limit=limit, as_json=as_json)
     rows_raw = data.get("rows", [])
     if as_json:
         return print_json(rows_raw)
@@ -1552,7 +1554,7 @@ def gsc_perf_cmd(site, days, as_json):
     creds = get_credentials()
     end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
     start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
-    data = gsc_search_analytics(creds, site, start, end, dimensions=["date"], row_limit=1000)
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["date"], row_limit=1000, as_json=as_json)
     rows_raw = data.get("rows", [])
     if as_json:
         return print_json(rows_raw)
@@ -1570,7 +1572,7 @@ def gsc_perf_cmd(site, days, as_json):
 def gsc_sitemaps_cmd(site, as_json):
     """List submitted sitemaps for a Search Console property."""
     enforce_allowed_caller()
-    data = gsc_list_sitemaps(get_credentials(), site)
+    data = gsc_list_sitemaps(get_credentials(), site, as_json=as_json)
     sitemaps = data.get("sitemap", [])
     if as_json:
         return print_json(sitemaps)
@@ -1588,7 +1590,7 @@ def gsc_sitemaps_cmd(site, as_json):
 def gsc_inspect_cmd(url, site, lang, as_json):
     """Inspect a URL's index status via Search Console URL Inspection API."""
     enforce_allowed_caller()
-    data = gsc_url_inspect(get_credentials(), url, site, language_code=lang)
+    data = gsc_url_inspect(get_credentials(), url, site, language_code=lang, as_json=as_json)
     if as_json:
         return print_json(data)
     result = data.get("inspectionResult", {})
@@ -1617,7 +1619,7 @@ def gsc_inspect_cmd(url, site, lang, as_json):
 def merchant_account(as_json):
     """Account info."""
     enforce_allowed_caller()
-    data = mc_get_account(get_credentials())
+    data = mc_get_account(get_credentials(), as_json=as_json)
     if as_json: return print_json(data)
     rows = [{"field": k, "value": v} for k, v in data.items() if not isinstance(v, (dict, list))]
     print_table(rows, ["field", "value"])
@@ -1627,7 +1629,7 @@ def merchant_account(as_json):
 def merchant_status(as_json):
     """Account issues."""
     enforce_allowed_caller()
-    data = mc_get_account_status(get_credentials())
+    data = mc_get_account_status(get_credentials(), as_json=as_json)
     if as_json: return print_json(data)
     issues = data.get("accountIssues", [])
     if not issues: return click.secho("  No issues.", fg="green")
@@ -1643,7 +1645,7 @@ def merchant_status(as_json):
 def merchant_products(limit, as_json):
     """List products."""
     enforce_allowed_caller()
-    data = mc_list_products(get_credentials(), max_results=limit)
+    data = mc_list_products(get_credentials(), max_results=limit, as_json=as_json)
     products = data.get("products", [])
     if as_json: return print_json(products)
     def _price(attrs):
@@ -1671,7 +1673,7 @@ def merchant_products(limit, as_json):
 def merchant_product_status(limit, as_json):
     """Product approval statuses."""
     enforce_allowed_caller()
-    data = mc_list_product_statuses(get_credentials(), max_results=limit)
+    data = mc_list_product_statuses(get_credentials(), max_results=limit, as_json=as_json)
     statuses = data.get("products", [])
     if as_json: return print_json(statuses)
     rows = []
@@ -1691,7 +1693,7 @@ def merchant_product_status(limit, as_json):
 def merchant_feeds(as_json):
     """Data feeds."""
     enforce_allowed_caller()
-    data = mc_list_datafeeds(get_credentials())
+    data = mc_list_datafeeds(get_credentials(), as_json=as_json)
     feeds = data.get("dataSources", [])
     if as_json: return print_json(feeds)
     def _ds_type(f):
@@ -1710,7 +1712,7 @@ def merchant_feeds(as_json):
 def merchant_shipping(as_json):
     """Shipping settings."""
     enforce_allowed_caller()
-    data = mc_get_shipping(get_credentials())
+    data = mc_get_shipping(get_credentials(), as_json=as_json)
     if as_json: return print_json(data)
     rows = [{"name": s.get("serviceName",""),
              "country": ", ".join(s.get("deliveryCountries", [])),
@@ -1722,7 +1724,7 @@ def merchant_shipping(as_json):
 def merchant_returns(as_json):
     """Return policy."""
     enforce_allowed_caller()
-    data = mc_get_return_policy(get_credentials())
+    data = mc_get_return_policy(get_credentials(), as_json=as_json)
     if as_json: return print_json(data)
     policies = data.get("onlineReturnPolicies", [])
     rows = [{"name": (p.get("name","").split("/")[-1] if p.get("name") else ""),
@@ -1739,7 +1741,7 @@ def merchant_returns(as_json):
 def ga4_metadata_cmd(property_id, as_json):
     """Available dimensions and metrics."""
     enforce_allowed_caller()
-    data = ga4_get_metadata(get_credentials(), property_id=property_id)
+    data = ga4_get_metadata(get_credentials(), property_id=property_id, as_json=as_json)
     if as_json: return print_json(data)
     dims, mets = data.get("dimensions",[]), data.get("metrics",[])
     click.secho(f"\n  Dimensions: {len(dims)}   Metrics: {len(mets)}\n", bold=True)
@@ -1761,7 +1763,7 @@ def ga4_report_cmd(property_id, dimensions, metrics, start_date, end_date, limit
     dims = [d.strip() for d in dimensions.split(",")]
     mets = [m.strip() for m in metrics.split(",")]
     data = ga4_run_report(get_credentials(), dims, mets,
-        [{"startDate": start_date, "endDate": end_date}], property_id=property_id, limit=limit)
+        [{"startDate": start_date, "endDate": end_date}], property_id=property_id, limit=limit, as_json=as_json)
     if as_json: return print_json(data)
     dim_h = [h.get("name","") for h in data.get("dimensionHeaders",[])]
     met_h = [h.get("name","") for h in data.get("metricHeaders",[])]
@@ -1783,7 +1785,7 @@ def ga4_realtime_cmd(property_id, dimensions, metrics, as_json):
     enforce_allowed_caller()
     dims = [d.strip() for d in dimensions.split(",")]
     mets = [m.strip() for m in metrics.split(",")]
-    data = ga4_run_realtime_report(get_credentials(), dims, mets, property_id=property_id)
+    data = ga4_run_realtime_report(get_credentials(), dims, mets, property_id=property_id, as_json=as_json)
     if as_json: return print_json(data)
     dim_h = [h.get("name","") for h in data.get("dimensionHeaders",[])]
     met_h = [h.get("name","") for h in data.get("metricHeaders",[])]
@@ -1815,7 +1817,7 @@ def ga4_batch_report_cmd(property_id, requests_file, as_json):
             {"dimensions": [{"name": "date"}], "metrics": [{"name": "keyEvents"}],
              "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}], "limit": 30},
         ]
-    data = ga4_batch_run_reports(get_credentials(), requests_list, property_id=property_id)
+    data = ga4_batch_run_reports(get_credentials(), requests_list, property_id=property_id, as_json=as_json)
     if as_json:
         return print_json(data)
     reports = data.get("reports", [])
@@ -1847,7 +1849,7 @@ def ga4_pivot_report_cmd(property_id, dimensions, metrics, start_date, end_date,
     mets = [m.strip() for m in metrics.split(",")]
     pivots = [{"fieldNames": [pivot_dim], "limit": 10, "orderBys": [{"metric": {"metricName": mets[0]}, "desc": True}]}]
     data = ga4_run_pivot_report(get_credentials(), dims, mets,
-        [{"startDate": start_date, "endDate": end_date}], pivots, property_id=property_id)
+        [{"startDate": start_date, "endDate": end_date}], pivots, property_id=property_id, as_json=as_json)
     if as_json:
         return print_json(data)
     rows_raw = data.get("rows", [])
@@ -1872,7 +1874,7 @@ def ga4_check_compatibility_cmd(property_id, dimensions, metrics, as_json):
     enforce_allowed_caller()
     dims = [d.strip() for d in dimensions.split(",")]
     mets = [m.strip() for m in metrics.split(",")]
-    data = ga4_check_compatibility(get_credentials(), dims, mets, property_id=property_id)
+    data = ga4_check_compatibility(get_credentials(), dims, mets, property_id=property_id, as_json=as_json)
     if as_json:
         return print_json(data)
     click.secho("\n  Dimension Compatibility\n", bold=True)

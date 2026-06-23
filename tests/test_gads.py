@@ -532,14 +532,14 @@ class TestVersion:
                 f"Version part {part!r} is not numeric in {gads_lib.__version__!r}"
             )
 
-    def test_version_is_3_8_0(self):
-        """gads_lib.__version__ == '3.8.0' — EXPECTED TO FAIL until version bumped."""
+    def test_version_is_3_8_1(self):
+        """gads_lib.__version__ == '3.8.1' — EXPECTED TO FAIL until version bumped."""
         import gads_lib
 
-        # This test intentionally fails at v3.7.0 to signal the pending version bump.
-        assert gads_lib.__version__ == "3.8.0", (
-            f"Expected version 3.8.0, got {gads_lib.__version__!r}. "
-            "Bump __version__ in gads_lib/__init__.py when releasing v3.8.0."
+        # This test intentionally fails at v3.8.0 to signal the pending version bump.
+        assert gads_lib.__version__ == "3.8.1", (
+            f"Expected version 3.8.1, got {gads_lib.__version__!r}. "
+            "Bump __version__ in gads_lib/__init__.py when releasing v3.8.1."
         )
 
 
@@ -912,3 +912,172 @@ class TestGracefulErrorHandling:
                     headers={},
                 )
         assert exc_info.value.code == 5  # EXIT_CODES["API"]
+
+
+# =============================================================================
+# GROUP H — JSON mode access error envelope
+# =============================================================================
+
+
+class TestJsonModeAccessErrors:
+    """H — --json mode emits machine-readable error envelopes on STDOUT for classified errors."""
+
+    _EXPECTED_KEYS = {"code", "message", "action", "service", "scope", "url", "project_id"}
+
+    def _capture_json_exit(self, monkeypatch, status_code, body, url):
+        """Helper: call request_json(as_json=True), capture stdout, return (parsed_json, exit_code)."""
+        from gads_lib.http import request_json
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = status_code
+        fake_resp.text = body
+
+        captured_output = io.StringIO()
+        exit_code = None
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                import contextlib
+                with contextlib.redirect_stdout(captured_output):
+                    request_json("GET", url, headers={}, as_json=True)
+        exit_code = exc_info.value.code
+        output = captured_output.getvalue().strip()
+        return json.loads(output), exit_code
+
+    def test_api_not_enabled_json_mode(self, monkeypatch):
+        """API_NOT_ENABLED: as_json=True emits JSON envelope to STDOUT and exits 5."""
+        body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": (
+                    "merchantapi.googleapis.com has not been used in project my-project-123 before"
+                    " or it is disabled. Enable it by visiting"
+                    " https://console.cloud.google.com/apis/library/merchantapi.googleapis.com"
+                    "?project=my-project-123 SERVICE_DISABLED"
+                ),
+            }
+        })
+        d, code = self._capture_json_exit(
+            monkeypatch,
+            status_code=403,
+            body=body,
+            url="https://merchantapi.googleapis.com/products/v1/accounts/123/products",
+        )
+        assert code == 5
+        assert "error" in d
+        assert d["error"]["code"] == "API_NOT_ENABLED"
+        missing = self._EXPECTED_KEYS - set(d["error"].keys())
+        assert not missing, f"JSON error envelope missing keys: {missing}"
+
+    def test_merchant_not_registered_json_mode(self, monkeypatch):
+        """MERCHANT_NOT_REGISTERED: as_json=True emits JSON envelope to STDOUT and exits 5."""
+        body = json.dumps({
+            "error": {"code": 401, "status": "UNAUTHENTICATED", "message": "GCP_NOT_REGISTERED"}
+        })
+        d, code = self._capture_json_exit(
+            monkeypatch,
+            status_code=401,
+            body=body,
+            url="https://merchantapi.googleapis.com/accounts/v1/accounts/123",
+        )
+        assert code == 5
+        assert "error" in d
+        assert d["error"]["code"] == "MERCHANT_NOT_REGISTERED"
+        missing = self._EXPECTED_KEYS - set(d["error"].keys())
+        assert not missing, f"JSON error envelope missing keys: {missing}"
+
+    def test_insufficient_scope_json_mode(self, monkeypatch):
+        """INSUFFICIENT_SCOPE: as_json=True emits JSON envelope to STDOUT and exits 5."""
+        body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "Request had insufficient authentication scopes. INSUFFICIENT_AUTHENTICATION_SCOPES",
+            }
+        })
+        d, code = self._capture_json_exit(
+            monkeypatch,
+            status_code=403,
+            body=body,
+            url="https://www.googleapis.com/webmasters/v3/sites",
+        )
+        assert code == 5
+        assert "error" in d
+        assert d["error"]["code"] == "INSUFFICIENT_SCOPE"
+        assert "webmasters" in (d["error"].get("scope") or "")
+        missing = self._EXPECTED_KEYS - set(d["error"].keys())
+        assert not missing, f"JSON error envelope missing keys: {missing}"
+
+    def test_permission_denied_json_mode(self, monkeypatch):
+        """PERMISSION_DENIED: as_json=True emits JSON envelope to STDOUT and exits 5."""
+        body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "The caller does not have PERMISSION_DENIED access.",
+            }
+        })
+        d, code = self._capture_json_exit(
+            monkeypatch,
+            status_code=403,
+            body=body,
+            url="https://mybusinessbusinessinformation.googleapis.com/v1/accounts/123/locations",
+        )
+        assert code == 5
+        assert "error" in d
+        assert d["error"]["code"] == "PERMISSION_DENIED"
+        missing = self._EXPECTED_KEYS - set(d["error"].keys())
+        assert not missing, f"JSON error envelope missing keys: {missing}"
+
+    def test_merchant_not_registered_non_json_mode_stdout_empty(self, monkeypatch, capsys):
+        """Non-JSON mode: MERCHANT_NOT_REGISTERED prints human text to STDERR, STDOUT is empty."""
+        from gads_lib.http import request_json
+
+        body = json.dumps({
+            "error": {"code": 401, "status": "UNAUTHENTICATED", "message": "GCP_NOT_REGISTERED"}
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 401
+        fake_resp.text = body
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                request_json(
+                    "GET",
+                    "https://merchantapi.googleapis.com/accounts/v1/accounts/123",
+                    headers={},
+                    as_json=False,
+                )
+        assert exc_info.value.code == 5
+        captured = capsys.readouterr()
+        assert captured.out == "", f"Expected empty STDOUT in non-JSON mode, got: {captured.out!r}"
+        assert captured.err, "Expected human-readable advisory on STDERR in non-JSON mode"
+
+    def test_insufficient_scope_non_json_mode_stdout_empty(self, monkeypatch, capsys):
+        """Non-JSON mode: INSUFFICIENT_SCOPE prints human text to STDERR, STDOUT is empty."""
+        from gads_lib.http import request_json
+
+        body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "Request had insufficient authentication scopes. INSUFFICIENT_AUTHENTICATION_SCOPES",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = body
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                request_json(
+                    "GET",
+                    "https://www.googleapis.com/webmasters/v3/sites",
+                    headers={},
+                    as_json=False,
+                )
+        assert exc_info.value.code == 5
+        captured = capsys.readouterr()
+        assert captured.out == "", f"Expected empty STDOUT in non-JSON mode, got: {captured.out!r}"
+        assert captured.err, "Expected human-readable advisory on STDERR in non-JSON mode"

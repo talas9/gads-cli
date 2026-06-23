@@ -25,17 +25,18 @@ def _require_property():
 
 
 # KB: kb/ga4.md § metadata | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/getMetadata
-def ga4_get_metadata(creds, property_id=None):
+def ga4_get_metadata(creds, property_id=None, as_json=False):
     pid = property_id or _require_property()
     return request_json(
         "GET",
         f"{GA4_DATA_BASE}/properties/{pid}/metadata",
         headers=get_bearer_headers(creds),
+        as_json=as_json,
     )
 
 
 # KB: kb/ga4.md § run-report | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport
-def ga4_run_report(creds, dimensions, metrics, date_ranges, property_id=None, limit=10000):
+def ga4_run_report(creds, dimensions, metrics, date_ranges, property_id=None, limit=10000, as_json=False):
     pid = property_id or _require_property()
     body = {
         "dimensions": [{"name": d} for d in dimensions],
@@ -48,11 +49,12 @@ def ga4_run_report(creds, dimensions, metrics, date_ranges, property_id=None, li
         f"{GA4_DATA_BASE}/properties/{pid}:runReport",
         headers=get_bearer_headers(creds),
         json_body=body,
+        as_json=as_json,
     )
 
 
 # KB: kb/ga4.md § realtime-report | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runRealtimeReport
-def ga4_run_realtime_report(creds, dimensions, metrics, property_id=None):
+def ga4_run_realtime_report(creds, dimensions, metrics, property_id=None, as_json=False):
     pid = property_id or _require_property()
     body = {
         "dimensions": [{"name": d} for d in dimensions],
@@ -63,6 +65,7 @@ def ga4_run_realtime_report(creds, dimensions, metrics, property_id=None):
         f"{GA4_DATA_BASE}/properties/{pid}:runRealtimeReport",
         headers=get_bearer_headers(creds),
         json_body=body,
+        as_json=as_json,
     )
 
 
@@ -201,7 +204,7 @@ def delete_key_event(property_id, creds, event_name):
 
 
 # KB: kb/ga4.md § batch-run-reports | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/batchRunReports
-def ga4_batch_run_reports(creds, requests_list, property_id=None):
+def ga4_batch_run_reports(creds, requests_list, property_id=None, as_json=False):
     """Run multiple GA4 reports in a single API call.
 
     POST /v1beta/properties/{pid}:batchRunReports
@@ -225,11 +228,12 @@ def ga4_batch_run_reports(creds, requests_list, property_id=None):
         f"{GA4_DATA_BASE}/properties/{pid}:batchRunReports",
         headers=get_bearer_headers(creds),
         json_body=body,
+        as_json=as_json,
     )
 
 
 # KB: kb/ga4.md § pivot-report | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runPivotReport
-def ga4_run_pivot_report(creds, dimensions, metrics, date_ranges, pivots, property_id=None):
+def ga4_run_pivot_report(creds, dimensions, metrics, date_ranges, pivots, property_id=None, as_json=False):
     """Run a GA4 pivot report.
 
     POST /v1beta/properties/{pid}:runPivotReport
@@ -262,11 +266,12 @@ def ga4_run_pivot_report(creds, dimensions, metrics, date_ranges, pivots, proper
         f"{GA4_DATA_BASE}/properties/{pid}:runPivotReport",
         headers=get_bearer_headers(creds),
         json_body=body,
+        as_json=as_json,
     )
 
 
 # KB: kb/ga4.md § check-compatibility | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/checkCompatibility
-def ga4_check_compatibility(creds, dimensions, metrics, property_id=None):
+def ga4_check_compatibility(creds, dimensions, metrics, property_id=None, as_json=False):
     """Check which dimensions and metrics are compatible with each other.
 
     POST /v1beta/properties/{pid}:checkCompatibility
@@ -299,4 +304,5 @@ def ga4_check_compatibility(creds, dimensions, metrics, property_id=None):
         f"{GA4_DATA_BASE}/properties/{pid}:checkCompatibility",
         headers=get_bearer_headers(creds),
         json_body=body,
+        as_json=as_json,
     )

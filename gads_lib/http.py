@@ -1,3 +1,6 @@
+import json
+import sys
+
 import click
 import requests
 
@@ -5,7 +8,7 @@ from .config import DEV_TOKEN, LOGIN_CUSTOMER_ID
 from .output import EXIT_CODES, classify_api_error, offer_gcloud_enable
 
 
-def request_json(method, url, *, headers=None, params=None, json_body=None, timeout=30):
+def request_json(method, url, *, headers=None, params=None, json_body=None, timeout=30, as_json=False):
     resp = requests.request(
         method,
         url,
@@ -17,6 +20,10 @@ def request_json(method, url, *, headers=None, params=None, json_body=None, time
     if resp.status_code >= 400:
         classified = classify_api_error(resp.status_code, resp.text, url=url)
         if classified:
+            if as_json:
+                sys.stdout.write(json.dumps({"error": classified}) + "\n")
+                sys.stdout.flush()
+                raise SystemExit(EXIT_CODES["API"])
             code = classified["code"]  # noqa: F841
             msg = classified["message"]
             action = classified.get("action")
@@ -53,6 +60,20 @@ def request_json(method, url, *, headers=None, params=None, json_body=None, time
             raise SystemExit(EXIT_CODES["API"])
         else:
             detail = resp.text[:1200]
+            if as_json:
+                sys.stdout.write(json.dumps({
+                    "error": {
+                        "code": "API_ERROR",
+                        "message": detail,
+                        "action": None,
+                        "service": None,
+                        "scope": None,
+                        "url": None,
+                        "project_id": None,
+                    }
+                }) + "\n")
+                sys.stdout.flush()
+                raise SystemExit(EXIT_CODES["API"])
             click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
             raise SystemExit(EXIT_CODES["API"])
     if not resp.text:

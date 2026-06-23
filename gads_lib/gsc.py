@@ -11,9 +11,9 @@ GSC_INSPECT_BASE = "https://searchconsole.googleapis.com/v1"
 
 
 # KB: kb/search-console.md § sites | https://developers.google.com/webmaster-tools/v1/sites/list
-def gsc_list_sites(creds):
+def gsc_list_sites(creds, as_json=False):
     """List all verified Search Console sites."""
-    return request_json("GET", f"{GSC_BASE}/sites", headers=get_bearer_headers(creds))
+    return request_json("GET", f"{GSC_BASE}/sites", headers=get_bearer_headers(creds), as_json=as_json)
 
 
 # KB: kb/search-console.md § search-analytics | https://developers.google.com/webmaster-tools/v1/searchanalytics/query
@@ -28,6 +28,7 @@ def gsc_search_analytics(
     start_row=0,
     data_state="final",
     dimension_filter_groups=None,
+    as_json=False,
 ):
     """Query Search Console search analytics.
 
@@ -58,11 +59,12 @@ def gsc_search_analytics(
         f"{GSC_BASE}/sites/{encoded_url}/searchAnalytics/query",
         headers=get_bearer_headers(creds),
         json_body=body,
+        as_json=as_json,
     )
 
 
 # KB: kb/search-console.md § sitemaps | https://developers.google.com/webmaster-tools/v1/sitemaps/list
-def gsc_list_sitemaps(creds, site_url, sitemap_index=None):
+def gsc_list_sitemaps(creds, site_url, sitemap_index=None, as_json=False):
     """List sitemaps for a Search Console property.
 
     site_url: the property URL (must match verified property exactly)
@@ -80,11 +82,12 @@ def gsc_list_sitemaps(creds, site_url, sitemap_index=None):
         url,
         headers=get_bearer_headers(creds),
         params=params if params else None,
+        as_json=as_json,
     )
 
 
 # KB: kb/search-console.md § url-inspection | https://developers.google.com/webmaster-tools/v1/urlInspection.index/inspect
-def gsc_url_inspect(creds, inspection_url, site_url, language_code="en-US"):
+def gsc_url_inspect(creds, inspection_url, site_url, language_code="en-US", as_json=False):
     """Inspect a URL using the Search Console URL Inspection API.
 
     inspection_url: the URL to inspect
@@ -102,4 +105,5 @@ def gsc_url_inspect(creds, inspection_url, site_url, language_code="en-US"):
         f"{GSC_INSPECT_BASE}/urlInspection/index:inspect",
         headers=get_bearer_headers(creds),
         json_body=body,
+        as_json=as_json,
     )

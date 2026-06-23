@@ -1085,3 +1085,877 @@ The gads CLI (`gads_lib/ga4.py`) currently uses:
 | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents | keyEvents resource (v1alpha) all methods |
 | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents/list | keyEvents.list — pagination params and auth scopes |
 | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents | keyEvents resource (v1beta) — confirms same methods available |
+
+---
+
+## Developer Guide
+
+A deeper reference for building against the GA4 APIs. Supplements the concrete examples above with schema definitions, naming rules, advanced endpoints, and operational patterns.
+
+Source references: https://developers.google.com/analytics/devguides/reporting/data/v1 and https://developers.google.com/analytics/devguides/config/admin/v1
+
+---
+
+### 1. Report Request Schema — Full Field Map
+
+`POST /v1beta/properties/{property}:runReport` accepts the following top-level fields:
+
+```json
+{
+  "dimensions":         [ { "name": "string" } ],
+  "metrics":            [ { "name": "string" } ],
+  "dateRanges":         [ { "startDate": "string", "endDate": "string", "name": "string?" } ],
+  "dimensionFilter":    FilterExpression,
+  "metricFilter":       FilterExpression,
+  "orderBys":           [ OrderBy ],
+  "limit":              integer,
+  "offset":             integer,
+  "metricAggregations": [ "TOTAL" | "MINIMUM" | "MAXIMUM" | "COUNT" ],
+  "keepEmptyRows":      boolean,
+  "returnPropertyQuota": boolean,
+  "currencyCode":       "ISO-4217",
+  "comparisons":        [ Comparison ],
+  "cohortSpec":         CohortSpec
+}
+```
+
+**Field-by-field notes:**
+
+| Field | Default | Max | Notes |
+|-------|---------|-----|-------|
+| `dimensions` | none | ~9 per request | Each element: `{"name": "dimensionApiName"}` |
+| `metrics` | none | ~10 per request | Each element: `{"name": "metricApiName"}` |
+| `dateRanges` | none | 4 ranges | Multi-range adds a `dateRange` dimension automatically |
+| `dimensionFilter` | none | — | Applied before aggregation (WHERE equivalent) |
+| `metricFilter` | none | — | Applied after aggregation (HAVING equivalent) |
+| `orderBys` | none | — | Array of `OrderBy` objects; see schema below |
+| `limit` | 10,000 | 250,000 | Rows per page |
+| `offset` | 0 | — | Zero-indexed row start for pagination |
+| `keepEmptyRows` | false | — | When true, rows with all-zero metrics are included |
+| `returnPropertyQuota` | false | — | Include token quota state in each response |
+
+**OrderBy schema:**
+
+```json
+// Sort by metric (descending)
+{"metric": {"metricName": "sessions"}, "desc": true}
+
+// Sort by dimension (ascending)
+{"dimension": {"dimensionName": "date"}, "desc": false}
+
+// Sort by dimension value as a number (e.g. date string treated numerically)
+{"dimension": {"dimensionName": "date", "orderType": "NUMERIC"}, "desc": false}
+```
+
+`orderType` values for dimension orderBys: `ALPHANUMERIC` (default), `CASE_INSENSITIVE_ALPHANUMERIC`, `NUMERIC`.
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport
+
+---
+
+### 2. Dimension and Metric Naming
+
+**Naming conventions:**
+
+| Prefix | Meaning | Example |
+|--------|---------|---------|
+| (none) | Built-in GA4 dimension or metric | `sessions`, `date`, `country` |
+| `customEvent:` | Event-scoped custom dimension (registered in Admin) | `customEvent:branch` |
+| `customUser:` | User-scoped custom dimension | `customUser:loyalty_tier` |
+| `keyEvents:` | Per-event-name key event metric | `keyEvents:whatsapp_click` |
+
+**There is no `ga:` prefix in GA4.** The `ga:` prefix belongs to Universal Analytics (GA3) and is not used in the GA4 Data API. All GA4 API names are used bare (e.g. `sessions`, not `ga:sessions`).
+
+**Common dimensions:**
+
+| API Name | UI Name | Category |
+|----------|---------|----------|
+| `date` | Date | Time |
+| `dateHour` | Date + hour | Time |
+| `week` | Week (ISO week number) | Time |
+| `month` | Month | Time |
+| `year` | Year | Time |
+| `sessionDefaultChannelGroup` | Session default channel group | Traffic source |
+| `sessionSource` | Session source | Traffic source |
+| `sessionMedium` | Session medium | Traffic source |
+| `sessionCampaignName` | Session campaign | Traffic source |
+| `firstUserSource` | First user source | User acquisition |
+| `firstUserMedium` | First user medium | User acquisition |
+| `firstUserCampaignName` | First user campaign | User acquisition |
+| `deviceCategory` | Device category | Platform |
+| `operatingSystem` | Operating system | Platform |
+| `browser` | Browser | Platform |
+| `country` | Country | Geography |
+| `region` | Region | Geography |
+| `city` | City | Geography |
+| `landingPage` | Landing page + query string | Page / screen |
+| `pagePath` | Page path + query string | Page / screen |
+| `pageTitle` | Page title | Page / screen |
+| `eventName` | Event name | Event |
+| `platform` | Platform (Web / iOS / Android) | Platform |
+
+**Common metrics:**
+
+| API Name | UI Name | Type | Notes |
+|----------|---------|------|-------|
+| `sessions` | Sessions | INTEGER | Session count |
+| `activeUsers` | Active users | INTEGER | Users with at least one engaged event |
+| `totalUsers` | Total users | INTEGER | All users including bounced |
+| `newUsers` | New users | INTEGER | First-time users |
+| `screenPageViews` | Views | INTEGER | Page views + screen views |
+| `engagedSessions` | Engaged sessions | INTEGER | Sessions with engagement >10s, 1+ conversion, 2+ views |
+| `engagementRate` | Engagement rate | FLOAT | engagedSessions / sessions |
+| `bounceRate` | Bounce rate | FLOAT | 1 − engagementRate |
+| `averageSessionDuration` | Average session duration | SECONDS | |
+| `conversions` | Conversions | INTEGER | Total key event count (all key events) |
+| `keyEvents` | Key events | INTEGER | Synonym for `conversions` |
+| `totalRevenue` | Total revenue | CURRENCY | Purchase + subscription + ad revenue |
+| `purchaseRevenue` | Purchase revenue | CURRENCY | Ecommerce revenue only |
+| `eventCount` | Event count | INTEGER | Total events fired |
+| `eventCountPerUser` | Events per user | FLOAT | |
+| `userEngagementDuration` | User engagement duration | SECONDS | |
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema
+
+---
+
+### 3. Date Range Patterns
+
+**Accepted date formats for `startDate` / `endDate`:**
+
+| Format | Example | Notes |
+|--------|---------|-------|
+| `YYYY-MM-DD` | `"2026-01-15"` | Absolute date in property timezone |
+| `NdaysAgo` | `"7daysAgo"`, `"30daysAgo"` | N must be a positive integer; resolves relative to today in property timezone |
+| `yesterday` | `"yesterday"` | Equivalent to `"1daysAgo"` |
+| `today` | `"today"` | Current day (partial data — avoid for performance analysis) |
+
+**Single range (most common):**
+```json
+"dateRanges": [{"startDate": "30daysAgo", "endDate": "yesterday"}]
+```
+
+**Multi-range comparison (period over period):**
+```json
+"dateRanges": [
+  {"name": "this_period", "startDate": "7daysAgo", "endDate": "yesterday"},
+  {"name": "prior_period", "startDate": "14daysAgo", "endDate": "8daysAgo"}
+]
+```
+
+When multiple date ranges are specified, the response automatically adds a `dateRange` dimension column whose values are the `name` strings you supplied (or `date_range_0`, `date_range_1`, etc. if names are omitted). Each row is scoped to one date range, enabling side-by-side comparison in a single query.
+
+Maximum 4 date ranges per request. Avoid using `today` in production queries — data for the current day is incomplete and results will change.
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport
+
+---
+
+### 4. Filter Expressions — Full Schema
+
+`dimensionFilter` and `metricFilter` both accept a `FilterExpression` object. The schemas are identical; only the valid field names differ (dimension names vs metric names).
+
+**FilterExpression union type** — exactly one of these keys must be present:
+
+```
+FilterExpression =
+  | { "filter": Filter }
+  | { "andGroup": FilterExpressionList }
+  | { "orGroup": FilterExpressionList }
+  | { "notExpression": FilterExpression }
+```
+
+**Filter object:**
+```json
+{
+  "fieldName": "country",
+  "<filterType>": { ... }
+}
+```
+
+**StringFilter:**
+```json
+{
+  "fieldName": "sessionSource",
+  "stringFilter": {
+    "matchType": "EXACT",
+    "value": "google",
+    "caseSensitive": false
+  }
+}
+```
+
+`matchType` values:
+- `EXACT` — full string equality
+- `BEGINS_WITH` — prefix match
+- `ENDS_WITH` — suffix match
+- `CONTAINS` — substring search
+- `FULL_REGEXP` — entire value must match the regex
+- `PARTIAL_REGEXP` — any part of the value must match the regex
+
+**NumericFilter:**
+```json
+{
+  "fieldName": "sessions",
+  "numericFilter": {
+    "operation": "GREATER_THAN",
+    "value": {"int64Value": "100"}
+  }
+}
+```
+
+`operation` values: `EQUAL`, `LESS_THAN`, `LESS_THAN_OR_EQUAL`, `GREATER_THAN`, `GREATER_THAN_OR_EQUAL`.
+`value` is `{"int64Value": "N"}` or `{"doubleValue": N}`.
+
+**BetweenFilter:**
+```json
+{
+  "fieldName": "sessions",
+  "betweenFilter": {
+    "fromValue": {"int64Value": "10"},
+    "toValue":   {"int64Value": "500"}
+  }
+}
+```
+Inclusive on both ends.
+
+**InListFilter:**
+```json
+{
+  "fieldName": "country",
+  "inListFilter": {
+    "values": ["United Arab Emirates", "Saudi Arabia", "Kuwait"],
+    "caseSensitive": false
+  }
+}
+```
+
+**Compound expressions:**
+```json
+// AND: all conditions must match
+{
+  "andGroup": {
+    "expressions": [
+      {"filter": {"fieldName": "country", "stringFilter": {"matchType": "EXACT", "value": "United Arab Emirates"}}},
+      {"filter": {"fieldName": "deviceCategory", "stringFilter": {"matchType": "EXACT", "value": "mobile"}}}
+    ]
+  }
+}
+
+// OR: at least one must match
+{
+  "orGroup": {
+    "expressions": [
+      {"filter": {"fieldName": "sessionMedium", "stringFilter": {"matchType": "EXACT", "value": "cpc"}}},
+      {"filter": {"fieldName": "sessionMedium", "stringFilter": {"matchType": "EXACT", "value": "paidsearch"}}}
+    ]
+  }
+}
+
+// NOT
+{
+  "notExpression": {
+    "filter": {
+      "fieldName": "sessionSource",
+      "stringFilter": {"matchType": "EXACT", "value": "(direct)"}
+    }
+  }
+}
+```
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport#FilterExpression
+
+---
+
+### 5. Key Events (Formerly Conversions)
+
+GA4 renamed "conversion events" to "key events" in 2023. The Admin API resource is `properties.keyEvents`.
+
+**Admin API methods (both v1alpha and v1beta):**
+
+| Method | HTTP | Path |
+|--------|------|------|
+| `create` | POST | `/properties/{property}/keyEvents` |
+| `list` | GET | `/properties/{property}/keyEvents` |
+| `get` | GET | `/properties/{property}/keyEvents/{keyEvent}` |
+| `patch` | PATCH | `/properties/{property}/keyEvents/{keyEvent}` |
+| `delete` | DELETE | `/properties/{property}/keyEvents/{keyEvent}` |
+
+**KeyEvent create request body:**
+```json
+{
+  "eventName": "whatsapp_click",
+  "countingMethod": "ONCE_PER_EVENT",
+  "defaultValue": {
+    "numericValue": 0.0,
+    "currencyCode": "AED"
+  }
+}
+```
+
+**`countingMethod` enum:**
+
+| Value | Behavior | When to use |
+|-------|----------|-------------|
+| `ONCE_PER_EVENT` | Every firing of the event counts as one key event | Clicks, form submits — each action is meaningful |
+| `ONCE_PER_SESSION` | At most one key event per session per user | Purchases, signups — avoid double-counting within a visit |
+
+**`custom` field (output-only):**
+- `false` — GA4 built-in event (e.g. `purchase`, `first_visit`, `session_start`) promoted to key event
+- `true` — developer-defined custom event promoted to key event
+
+**`deletable` field (output-only):**
+- `false` — protected by GA4; cannot be deleted via API. Typically `session_start` and `first_visit`.
+- `true` — can be deleted
+
+**`defaultValue`:**
+- Optional. Assigns a monetary value to key event firings that do not include a `value` parameter.
+- `currencyCode` is required when `numericValue` is set.
+
+**Patch (update) example** — change counting method without delete+recreate:
+```json
+PATCH /v1beta/properties/271773771/keyEvents/44444444?updateMask=countingMethod
+{
+  "countingMethod": "ONCE_PER_SESSION"
+}
+```
+`updateMask` is a comma-separated field path list. Only those fields are updated.
+
+**Auto-collected events that can become key events:**
+`purchase`, `add_to_cart`, `begin_checkout`, `add_payment_info`, `add_shipping_info`, `view_item`, `view_cart`, `first_visit`, `session_start`, `page_view`, `scroll`, `click`, `file_download`, `video_start`, `video_progress`, `video_complete`, `form_start`, `form_submit`, `search`.
+
+Sources: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents, https://developers.google.com/analytics/devguides/config/admin/v1
+
+---
+
+### 6. Realtime Reports
+
+`POST /v1beta/properties/{property}:runRealtimeReport`
+
+**Key differences from `runReport`:**
+
+| Aspect | runReport | runRealtimeReport |
+|--------|-----------|-------------------|
+| Time axis | `dateRanges` (days) | `minuteRanges` (minutes ago) |
+| Window | Historical (yesterday and older) | Last 30 min (standard) / 60 min (360) |
+| Pagination | `offset` + `limit` | `limit` only — no offset |
+| `keepEmptyRows` | Supported | NOT supported |
+| `cohortSpec` | Supported | NOT supported |
+| `comparisons` | Supported | NOT supported |
+| Dimension set | Full catalog | Reduced set (realtime-specific) |
+
+**`minuteRanges` schema:**
+```json
+"minuteRanges": [
+  {
+    "name": "last_5_min",
+    "startMinutesAgo": 4,
+    "endMinutesAgo": 0
+  },
+  {
+    "name": "prior_5_min",
+    "startMinutesAgo": 9,
+    "endMinutesAgo": 5
+  }
+]
+```
+
+- `startMinutesAgo` >= `endMinutesAgo` (start is further in the past)
+- `endMinutesAgo` minimum: 0 (right now)
+- `startMinutesAgo` maximum: 29 (standard) or 59 (360)
+- Maximum 2 minute ranges per request
+
+**Available realtime dimensions (subset of full catalog):**
+`city`, `cityId`, `country`, `countryId`, `deviceCategory`, `eventName`, `minutesAgo`, `platform`, `region`, `streamId`, `streamName`, `unifiedScreenName` (current page/screen), `audienceId`, `audienceName`, `firstUserGoogleAdsAdGroupName`, `firstUserGoogleAdsCampaignName`, `firstUserMedium`, `firstUserSource`, `firstUserSourceMedium`.
+
+**Available realtime metrics:**
+`activeUsers`, `conversions`, `eventCount`, `keyEvents`, `screenPageViews`.
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runRealtimeReport
+
+---
+
+### 7. batchRunReports
+
+`POST /v1beta/properties/{property}:batchRunReports`
+
+Sends up to 5 `runReport`-equivalent requests in a single HTTP call. Each sub-request shares the same property but can have independent dimensions, metrics, date ranges, and filters.
+
+**Request shape:**
+```json
+{
+  "requests": [
+    {
+      "dimensions": [{"name": "date"}],
+      "metrics": [{"name": "sessions"}, {"name": "activeUsers"}],
+      "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}]
+    },
+    {
+      "dimensions": [{"name": "country"}],
+      "metrics": [{"name": "sessions"}],
+      "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}],
+      "orderBys": [{"metric": {"metricName": "sessions"}, "desc": true}],
+      "limit": 20
+    }
+  ]
+}
+```
+
+**Response shape:**
+```json
+{
+  "reports": [
+    {
+      "dimensionHeaders": [...],
+      "metricHeaders": [...],
+      "rows": [...],
+      "rowCount": 7,
+      "metadata": {...},
+      "kind": "analyticsData#runReport"
+    },
+    {
+      "dimensionHeaders": [...],
+      "metricHeaders": [...],
+      "rows": [...],
+      "rowCount": 42,
+      "metadata": {...},
+      "kind": "analyticsData#runReport"
+    }
+  ],
+  "kind": "analyticsData#batchRunReports"
+}
+```
+
+- `reports[i]` corresponds to `requests[i]` — order is preserved.
+- Each sub-report is independently paged; check `rowCount` per report.
+- Quota cost: each sub-report consumes tokens independently, but the overhead is lower than 5 separate HTTP calls.
+- Maximum 5 requests per batch call.
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/batchRunReports
+
+---
+
+### 8. runPivotReport
+
+`POST /v1beta/properties/{property}:runPivotReport`
+
+Cross-tabulation report. Useful for campaign × device or channel × country breakdowns where you want values spread into columns rather than rows.
+
+**Request shape:**
+```json
+{
+  "dimensions": [
+    {"name": "sessionDefaultChannelGroup"},
+    {"name": "deviceCategory"}
+  ],
+  "metrics": [
+    {"name": "sessions"},
+    {"name": "conversions"}
+  ],
+  "dateRanges": [{"startDate": "30daysAgo", "endDate": "yesterday"}],
+  "pivots": [
+    {
+      "fieldNames": ["sessionDefaultChannelGroup"],
+      "limit": 10,
+      "orderBys": [{"metric": {"metricName": "sessions"}, "desc": true}]
+    },
+    {
+      "fieldNames": ["deviceCategory"],
+      "limit": 5,
+      "orderBys": [{"dimension": {"dimensionName": "deviceCategory"}, "desc": false}]
+    }
+  ]
+}
+```
+
+**Pivot object fields:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `fieldNames` | string[] | Dimension name(s) to pivot on — must be in the top-level `dimensions` array |
+| `limit` | integer | Max pivot columns; default 10 |
+| `offset` | integer | Column offset (pagination within pivot) |
+| `metricAggregations` | enum[] | `TOTAL`, `MINIMUM`, `MAXIMUM`, `COUNT` — per-pivot aggregates |
+| `orderBys` | OrderBy[] | Sort order for pivot columns |
+
+**Response shape** differs from `runReport`: instead of flat `rows`, the response contains `pivotHeaders` (column labels for each pivot) and `rows` where each row has `dimensionValues` and `metricValues` arranged in pivot order. Parsing is more complex; the `batchRunPivotReports` variant follows the same shape.
+
+**PivotSelection** (in response): `pivotDimensionHeaders` lists the header values that were selected for each pivot, in order.
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runPivotReport
+
+---
+
+### 9. checkCompatibility
+
+`POST /v1beta/properties/{property}:checkCompatibility`
+
+Validates which dimensions and metrics can be queried together before committing to a real report call. Use this when building dynamic report builders or debugging 400 errors from incompatible field combinations.
+
+**Request shape:**
+```json
+{
+  "dimensions": [{"name": "date"}, {"name": "sessionSource"}],
+  "metrics": [{"name": "sessions"}, {"name": "totalRevenue"}],
+  "dimensionFilter": {
+    "filter": {"fieldName": "country", "stringFilter": {"matchType": "EXACT", "value": "United Arab Emirates"}}
+  },
+  "compatibilityFilter": "COMPATIBLE"
+}
+```
+
+`compatibilityFilter` can be `"COMPATIBLE"` (return only compatible items), `"INCOMPATIBLE"`, or omitted (return all with their status).
+
+**Response shape:**
+```json
+{
+  "dimensionCompatibilities": [
+    {
+      "dimensionMetadata": {"apiName": "date", "uiName": "Date", ...},
+      "compatibility": "COMPATIBLE"
+    },
+    {
+      "dimensionMetadata": {"apiName": "cohort", "uiName": "Cohort", ...},
+      "compatibility": "INCOMPATIBLE"
+    }
+  ],
+  "metricCompatibilities": [
+    {
+      "metricMetadata": {"apiName": "sessions", "uiName": "Sessions", "type": "TYPE_INTEGER", ...},
+      "compatibility": "COMPATIBLE"
+    }
+  ]
+}
+```
+
+**`CompatibilityState` enum values:**
+- `COMPATIBLE` — can be added to the current request without error
+- `INCOMPATIBLE` — adding this field would cause a 400 error
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/checkCompatibility
+
+---
+
+### 10. Quota and Limits
+
+**Token-based quota model:**
+
+Each `runReport` request consumes a variable number of tokens depending on: row count returned, number of dimensions/metrics, date range span, filter complexity, and dimension cardinality. Simple queries on a small property cost ~1–5 tokens; large queries with many rows can cost hundreds.
+
+**Standard property quota limits:**
+
+| Quota bucket | Limit |
+|-------------|-------|
+| Tokens per property per day | 200,000 |
+| Tokens per property per hour | 40,000 |
+| Tokens per project per property per hour | 14,000 |
+| Concurrent requests per property | 10 |
+| Server errors per project per hour | 10 |
+| Potentially thresholded requests per hour | 120 |
+
+**Analytics 360 (paid tier) limits:** 10× higher on all token quotas; 50 concurrent requests.
+
+**Quota in responses** — request `"returnPropertyQuota": true` to get the current state:
+
+```json
+"propertyQuota": {
+  "tokensPerDay":                       {"consumed": 142, "remaining": 199858},
+  "tokensPerHour":                      {"consumed": 42,  "remaining": 39958},
+  "concurrentRequests":                 {"consumed": 1,   "remaining": 9},
+  "serverErrorsPerProjectPerHour":      {"consumed": 0,   "remaining": 10},
+  "potentiallyThresholdedRequestsPerHour": {"consumed": 3, "remaining": 117}
+}
+```
+
+**Quota enforcement:**
+- 429 `RESOURCE_EXHAUSTED` is returned when any quota bucket is exhausted.
+- Hourly quota resets on the hour boundary (not a rolling window).
+- Daily quota resets at midnight Pacific time.
+- Concurrent request quota is released when the response is returned.
+
+**Quota handling patterns:**
+```python
+def run_report_with_quota_check(payload, headers, url):
+    payload["returnPropertyQuota"] = True
+    resp = requests.post(url, json=payload, headers=headers)
+    if resp.status_code == 429:
+        # Wait and retry — quota exhausted
+        time.sleep(60)
+        return run_report_with_quota_check(payload, headers, url)
+    data = resp.json()
+    quota = data.get("propertyQuota", {})
+    remaining_hour = quota.get("tokensPerHour", {}).get("remaining", 999)
+    if remaining_hour < 100:
+        print(f"Warning: only {remaining_hour} hourly tokens remaining")
+    return data
+```
+
+Use `batchRunReports` to reduce per-request overhead when fetching multiple reports.
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/quotas
+
+---
+
+### 11. Pagination
+
+**runReport / runPivotReport / batchRunReports — offset-based pagination:**
+
+```python
+limit = 10000
+offset = 0
+all_rows = []
+
+while True:
+    body = {
+        **base_payload,
+        "limit": limit,
+        "offset": offset
+    }
+    resp = requests.post(url, json=body, headers=headers).json()
+    rows = resp.get("rows", [])
+    all_rows.extend(rows)
+    row_count = resp.get("rowCount", 0)
+    offset += len(rows)
+    if offset >= row_count or not rows:
+        break
+```
+
+Key points:
+- `rowCount` is the total number of matching rows in the full result set, NOT the count of rows in the current page.
+- `rows` may be absent (not empty list) when there are no results — use `resp.get("rows", [])`.
+- With `limit=250000` and `offset=0`, a single request fetches up to the maximum. For datasets larger than 250,000 rows, loop with offset increments.
+
+**Admin API list endpoints — pageToken-based pagination:**
+
+```python
+page_token = None
+all_items = []
+
+while True:
+    params = {"pageSize": 200}
+    if page_token:
+        params["pageToken"] = page_token
+    resp = requests.get(url, params=params, headers=headers).json()
+    all_items.extend(resp.get("keyEvents", []))  # or "customDimensions", etc.
+    page_token = resp.get("nextPageToken")        # absent (not null) on last page
+    if not page_token:
+        break
+```
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport
+
+---
+
+### 12. Admin API v1alpha vs v1beta
+
+**Version comparison for key resources:**
+
+| Resource | v1beta | v1alpha | Notes |
+|----------|--------|---------|-------|
+| `properties.keyEvents` | Stable | Stable | Identical method set; prefer v1beta |
+| `properties.customDimensions` | Stable | Stable | Prefer v1beta |
+| `properties.customMetrics` | Stable | Stable | Prefer v1beta |
+| `accounts` | Stable | Stable | Account listing |
+| `properties` | Stable | Stable | Property management |
+| `properties.audiences` | NOT present | Preview | Audience definition CRUD |
+| `properties.bigQueryLinks` | NOT present | Preview | BigQuery export configuration |
+| `properties.channelGroups` | NOT present | Preview | Custom channel grouping |
+| `properties.eventCreateRules` | NOT present | Preview | Server-side event modification |
+| `properties.expandedDataSets` | NOT present | Preview | Audience-based data subsets |
+| `properties.accessBindings` | NOT present | Preview | Fine-grained user access |
+
+**v1beta stability guarantee:** "No breaking changes are expected in this channel." v1alpha is an early-preview channel that may change without notice.
+
+**Migration recommendation:** For resources available in both versions (key events, custom dimensions, custom metrics), switch from v1alpha to v1beta by changing the base URL segment:
+
+```
+# Before
+https://analyticsadmin.googleapis.com/v1alpha/properties/{pid}/keyEvents
+
+# After
+https://analyticsadmin.googleapis.com/v1beta/properties/{pid}/keyEvents
+```
+
+No other code changes needed — the method paths, request bodies, and response shapes are identical for these resources.
+
+Sources: https://developers.google.com/analytics/devguides/config/admin/v1, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents
+
+---
+
+### 13. Custom Dimensions and Metrics CRUD
+
+**Custom dimensions** allow you to collect event or user parameters as reportable dimensions.
+
+**Admin API — `properties.customDimensions`:**
+
+| Method | HTTP | Path |
+|--------|------|------|
+| `list` | GET | `/v1beta/{parent=properties/*}/customDimensions` |
+| `create` | POST | `/v1beta/{parent=properties/*}/customDimensions` |
+| `get` | GET | `/v1beta/{name=properties/*/customDimensions/*}` |
+| `patch` | PATCH | `/v1beta/{name=properties/*/customDimensions/*}` |
+| `archive` | POST | `/v1beta/{name=properties/*/customDimensions/*}:archive` |
+
+**CustomDimension create request body:**
+```json
+{
+  "parameterName": "branch",
+  "displayName": "Branch",
+  "description": "Store branch identifier (QZ3, IND4, SJA)",
+  "scope": "EVENT",
+  "disallowAdsPersonalization": false
+}
+```
+
+**`scope` enum:**
+- `EVENT` — dimension value is read from the event parameter named `parameterName` each time the event fires
+- `USER` — dimension value is read from the user property named `parameterName` and attributed to all events for that user
+
+**Create response:**
+```json
+{
+  "name": "properties/271773771/customDimensions/cd1",
+  "parameterName": "branch",
+  "displayName": "Branch",
+  "description": "Store branch identifier",
+  "scope": "EVENT",
+  "disallowAdsPersonalization": false
+}
+```
+
+After creation, the dimension becomes available in reports as `customEvent:branch` (EVENT scope) or `customUser:branch` (USER scope). There is no delete — use `archive` to deactivate. Property limit: 50 event-scoped + 25 user-scoped custom dimensions.
+
+**Custom metrics** follow the same CRUD pattern at `properties.customMetrics`:
+
+```json
+// Create request body
+{
+  "parameterName": "quote_value",
+  "displayName": "Quote Value",
+  "description": "Estimated value of a parts quote",
+  "scope": "EVENT",
+  "measurementUnit": "CURRENCY"
+}
+```
+
+`measurementUnit` values: `STANDARD`, `CURRENCY`, `FEET`, `METERS`, `KILOMETERS`, `MILES`, `MILLISECONDS`, `SECONDS`, `MINUTES`, `HOURS`. Property limit: 50 event-scoped custom metrics.
+
+Sources: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.customDimensions, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.customMetrics
+
+---
+
+### 14. Audience Exports
+
+Audience exports allow you to retrieve the list of users who belong to a GA4 audience, enabling retargeting analysis or CRM matching.
+
+**v1beta endpoint (preferred):** `properties.audienceExports`
+
+**Step 1 — Create the export:**
+```
+POST /v1beta/properties/{property}/audienceExports
+```
+```json
+{
+  "audience": "properties/271773771/audiences/123456",
+  "dimensions": [
+    {"dimensionName": "deviceId"},
+    {"dimensionName": "userId"}
+  ]
+}
+```
+
+**Create response (operation — not immediately ready):**
+```json
+{
+  "name": "properties/271773771/audienceExports/abc123",
+  "audience": "properties/271773771/audiences/123456",
+  "audienceDisplayName": "Converted Users",
+  "dimensions": [{"dimensionName": "deviceId"}, {"dimensionName": "userId"}],
+  "state": "CREATING",
+  "creationQuotaTokensCharged": 30,
+  "beginCreatingTime": "2026-06-23T10:00:00Z"
+}
+```
+
+**Step 2 — Poll until state is `ACTIVE`:**
+```
+GET /v1beta/properties/{property}/audienceExports/{audienceExport}
+```
+
+Poll `state` field: `CREATING` → `ACTIVE` (or `FAILED`). Typically ready within minutes.
+
+**Step 3 — Query the export:**
+```
+POST /v1beta/properties/{property}/audienceExports/{audienceExport}:query
+```
+```json
+{"offset": 0, "limit": 10000}
+```
+
+Response:
+```json
+{
+  "audienceExport": { ... },
+  "audienceRows": [
+    {"dimensionValues": [{"value": "device-uuid-1"}, {"value": "user-id-1"}]},
+    {"dimensionValues": [{"value": "device-uuid-2"}, {"value": null}]}
+  ],
+  "rowCount": 4821
+}
+```
+
+Use offset-based pagination (same pattern as `runReport`) on the `query` endpoint.
+
+**Available export dimensions (limited set):**
+`deviceId`, `userId`, `isLimitedAdTracking`, `ipAddress`, `city`, `cityId`, `country`, `countryId`, `region`, `firstSessionDate`, `ga_session_id`, `gender`, `interests`, `age_bracket`.
+
+**v1alpha equivalent:** `properties.audienceLists` (predecessor; same concept but older resource name). Prefer v1beta `audienceExports` for new code.
+
+Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties.audienceExports
+
+---
+
+### 15. Best Practices
+
+**Property selection:**
+- Always use the numeric GA4 Property ID (e.g. `271773771`), not the Measurement ID (`G-XXXXXXXXXX`). They are different identifiers. The numeric ID is found in GA4 Admin > Property Settings > Property ID.
+- Use `properties/0/metadata` for the universal dimension/metric catalog when you don't have a specific property ID at build time.
+
+**Date range selection:**
+- Avoid `today` — data is partial and will change throughout the day.
+- For performance analysis, use `yesterday` or older. Attribution lag is 24–48 hours for some metrics.
+- When comparing periods, use explicit `YYYY-MM-DD` dates to avoid ambiguity during DST transitions or at month boundaries.
+- Use multi-range date comparison (two `dateRanges`) for period-over-period analysis rather than two separate report calls.
+
+**Sampling thresholds:**
+- GA4 standard properties may apply data sampling when queries return large result sets. Sampling is indicated by `metadata.samplingMetadatas` in the response, which includes `samplesReadCount` and `samplingSpacesSize`. If both values are present, the data is sampled.
+- To reduce sampling: narrow the date range, add more specific filters, or reduce the number of dimensions. Analytics 360 properties have higher sampling thresholds.
+- The `potentiallyThresholdedRequestsPerHour` quota bucket tracks requests that triggered the sampling threshold.
+
+**Cohort analysis:**
+- Cohort reports use the `cohortSpec` field in `runReport`. A cohort groups users by their `firstSessionDate` and tracks them over subsequent periods.
+- Cohorts require the `cohort` and `cohortNthDay` (or `cohortNthWeek`, `cohortNthMonth`) dimensions.
+- The date range in `cohortSpec.cohortsRange` controls the cohort acquisition window; `cohortSpec.cohortReportSettings.accumulate` controls whether metrics accumulate across the cohort period.
+
+**Dimension/metric discovery:**
+- Always call `GET /v1beta/properties/{pid}/metadata` before building a dynamic report. Cache the result for the session — it doesn't change frequently.
+- Custom dimensions appear with `customDefinition: true` and are prefixed `customEvent:` or `customUser:`.
+- Key event metrics appear prefixed `keyEvents:` (e.g. `keyEvents:whatsapp_click`).
+
+**Filter efficiency:**
+- Apply `dimensionFilter` rather than `metricFilter` where possible — dimension filters reduce data scanned before aggregation.
+- Use `inListFilter` for multi-value OR conditions on the same field rather than nested `orGroup` expressions — it is more readable and equally performant.
+
+**Quota management:**
+- Always use `"returnPropertyQuota": true` in production scripts to monitor consumption.
+- Batch multiple reports with `batchRunReports` (up to 5) to reduce per-call overhead.
+- For very large exports (> 250,000 rows), use `reportTasks` (v1alpha) for async execution, or paginate with `limit=250000` across multiple offset calls.
+- The `serverErrorsPerProjectPerHour` quota (10/hour standard) limits how many 5xx responses you can receive before being throttled. Implement exponential backoff on 500/503 responses.
+
+**Key event management:**
+- `eventName` is immutable after creation. Plan event naming carefully — renaming requires delete + recreate.
+- Use `countingMethod: ONCE_PER_SESSION` for high-frequency events that represent user intent (e.g. checkout start) to avoid inflated conversion counts.
+- After creating a key event, allow 24–48 hours for historical data to be reprocessed with the new key event status.
+- For bulk key event creation, handle 409 `ALREADY_EXISTS` as a no-op success, not a fatal error.
+
+Sources: https://developers.google.com/analytics/devguides/reporting/data/v1, https://developers.google.com/analytics/devguides/config/admin/v1

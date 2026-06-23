@@ -1,15 +1,22 @@
-"""Google Search Console API functions."""
+"""Google Search Console API functions.
+
+API: Google Search Console Webmasters API v3 + URL Inspection API v1
+KB reference: kb/search-console.md (relative to gads-cli root)
+Official docs: https://developers.google.com/webmaster-tools/v1/api_reference_index
+"""
 from .http import get_bearer_headers, request_json
 
 GSC_BASE = "https://www.googleapis.com/webmasters/v3"
 GSC_INSPECT_BASE = "https://searchconsole.googleapis.com/v1"
 
 
+# KB: kb/search-console.md § sites | https://developers.google.com/webmaster-tools/v1/sites/list
 def gsc_list_sites(creds):
     """List all verified Search Console sites."""
     return request_json("GET", f"{GSC_BASE}/sites", headers=get_bearer_headers(creds))
 
 
+# KB: kb/search-console.md § search-analytics | https://developers.google.com/webmaster-tools/v1/searchanalytics/query
 def gsc_search_analytics(
     creds,
     site_url,
@@ -54,6 +61,7 @@ def gsc_search_analytics(
     )
 
 
+# KB: kb/search-console.md § sitemaps | https://developers.google.com/webmaster-tools/v1/sitemaps/list
 def gsc_list_sitemaps(creds, site_url, sitemap_index=None):
     """List sitemaps for a Search Console property.
 
@@ -75,6 +83,7 @@ def gsc_list_sitemaps(creds, site_url, sitemap_index=None):
     )
 
 
+# KB: kb/search-console.md § url-inspection | https://developers.google.com/webmaster-tools/v1/urlInspection.index/inspect
 def gsc_url_inspect(creds, inspection_url, site_url, language_code="en-US"):
     """Inspect a URL using the Search Console URL Inspection API.
 

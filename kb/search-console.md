@@ -689,3 +689,555 @@ All claims in this document are sourced from the URLs below, fetched June 2026:
 - https://developers.google.com/search/blog/2020/08/search-console-api-announcements
 - https://developers.google.com/search/blog/2020/12/search-console-api-updates
 - https://developers.google.com/webmaster-tools/search-console-api-original/v3/sites/get
+
+---
+
+## Developer Guide
+
+Reference: https://developers.google.com/webmaster-tools
+
+### Search Analytics API — Request Schema
+
+`POST /sites/{siteUrl*}/searchAnalytics/query`
+
+Full request body schema:
+
+```json
+{
+  "startDate":              "YYYY-MM-DD",
+  "endDate":                "YYYY-MM-DD",
+  "dimensions":             ["query", "page", "country", "device", "searchAppearance", "date"],
+  "type":                   "web",
+  "aggregationType":        "AUTO",
+  "rowLimit":               25000,
+  "startRow":               0,
+  "dataState":              "final",
+  "dimensionFilterGroups":  []
+}
+```
+
+| Field | Type | Required | Default | Constraints |
+|---|---|---|---|---|
+| `startDate` | string (YYYY-MM-DD) | Yes | — | Pacific Time; must be <= endDate |
+| `endDate` | string (YYYY-MM-DD) | Yes | — | Pacific Time; must be >= startDate |
+| `dimensions` | string[] | No | (none) | Zero or more dimension values; order determines `keys[]` order in response |
+| `type` | string | No | `"web"` | SearchType enum; see SearchType Values section |
+| `aggregationType` | string | No | `"AUTO"` | `"AUTO"`, `"BY_PROPERTY"`, `"BY_PAGE"`, `"BY_NEWS_SHOWCASE_PANEL"` |
+| `rowLimit` | integer | No | 1000 | Hard maximum: 25000 |
+| `startRow` | integer | No | 0 | Zero-based row offset for pagination |
+| `dataState` | string | No | `"final"` | `"final"`, `"all"`, `"hourly_all"` |
+| `dimensionFilterGroups` | object[] | No | (none) | Server-side filter groups; see dimensionFilterGroups section |
+
+**Response shape:**
+
+```json
+{
+  "rows": [
+    {
+      "keys":        ["<dim1-value>", "<dim2-value>"],
+      "clicks":      0.0,
+      "impressions": 0.0,
+      "ctr":         0.0,
+      "position":    0.0
+    }
+  ],
+  "responseAggregationType": "byPage"
+}
+```
+
+- `rows` key is absent (not an empty array) when there is no data — always use `.get("rows", [])`.
+- `keys[]` order mirrors the `dimensions[]` order in the request.
+- `ctr` is a decimal fraction (0.15 = 15%).
+- `position` is 1-based average rank; lower is better.
+- `responseAggregationType` reports what aggregation the server actually applied.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+
+---
+
+### Dimensions
+
+Valid dimension values for `dimensions[]`:
+
+| Dimension | Description | Combinable |
+|---|---|---|
+| `query` | Search query string | Yes |
+| `page` | URL of the page that appeared in results | Yes |
+| `country` | ISO 3166-1 alpha-3 country code (e.g., `"ARE"`) | Yes |
+| `device` | `"DESKTOP"`, `"MOBILE"`, `"TABLET"` | Yes |
+| `searchAppearance` | Rich result type, AMP, etc. (see docs for current enum values) | No — cannot be combined with other dimensions |
+| `date` | Calendar date (YYYY-MM-DD) | Yes |
+| `hour` | Hour of day (0–23); requires `dataState: "hourly_all"` | Yes |
+
+**Behavior when combined:**
+When multiple dimensions are specified, each unique combination of dimension values produces a separate row. For example, `["query", "page"]` returns one row per (query, page) pair. The `keys[]` array in each row contains values in the same order as `dimensions[]`.
+
+**Behavior when no dimensions are specified:**
+The API returns a single aggregated row for the entire site across the date range. No `keys[]` in the row.
+
+**searchAppearance restriction:**
+`searchAppearance` cannot be combined with any other dimension in a single request. Request it alone if you need rich-result breakdown.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+
+---
+
+### SearchType Values
+
+The `type` field (also seen as `searchType` in older docs) controls which index the query runs against.
+
+| Value | Data covered |
+|---|---|
+| `web` | Standard web search results (default) |
+| `image` | Google Image Search results |
+| `video` | Google Video Search results |
+| `news` | Google News tab results |
+| `googleNews` | news.google.com and Google News app |
+| `discover` | Google Discover feed (no query data — query dimension is unsupported) |
+| `chromeNotifications` | Chrome browser notification cards |
+
+**Notes:**
+- `discover` does not support the `query` dimension — omit it or the API returns 400.
+- `googleNews` and `news` are distinct: `news` = news tab in web search; `googleNews` = the standalone News product.
+- Default is `web` if `type` is omitted.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+
+---
+
+### AggregationType
+
+Controls how data is aggregated when a URL appears in search results under multiple properties.
+
+| Value | Behavior | Use case |
+|---|---|---|
+| `AUTO` | Server chooses: `BY_PAGE` when `page` is in dimensions, otherwise `BY_PROPERTY` | Default; safe for most queries |
+| `BY_PROPERTY` | Aggregates impressions/clicks at the property level; a page counted once per property per query | Site-level performance totals |
+| `BY_PAGE` | Aggregates at the URL level; each URL counted separately | URL-level analysis, finding which pages rank |
+| `BY_NEWS_SHOWCASE_PANEL` | Aggregates for News Showcase panels | News Showcase-specific reporting |
+
+**Constraint:** Cannot use `BY_PAGE` when the `page` dimension is included or when filtering on `page` in `dimensionFilterGroups`. The API returns HTTP 400. Use `AUTO` instead — it will apply `BY_PAGE` automatically.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+
+---
+
+### DataState
+
+Controls which data maturity level to include in the response.
+
+| Value | Description | Typical lag | Use case |
+|---|---|---|---|
+| `final` | Only confirmed, fully processed data | ~3 days | Decision-making, reporting |
+| `all` | Confirmed + unconfirmed recent data | ~0 days (but values change) | Trend monitoring; do not use for decisions |
+| `hourly_all` | Hourly granularity (unconfirmed) | <1 day | Real-time monitoring; requires `hour` in dimensions |
+
+**Date range effects:**
+- With `dataState: "final"`, the most recent 2-3 days are excluded even if included in `startDate`/`endDate`.
+- With `dataState: "all"`, recent data is present but values will change as Google finalizes it.
+- `hourly_all` was added in April 2025 and requires the `hour` dimension. Historical hourly data availability varies.
+
+**Project rule alignment:** Per the talas-ads project rule (24-48h attribution lag), always use `dataState: "final"` for performance analysis and decision-making. Only use `"all"` for trend-spotting with explicit acknowledgment that values will change.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+
+---
+
+### Pagination
+
+The API enforces a hard maximum of **25,000 rows per request**. Large datasets (high-volume sites, wide date ranges, many dimensions) will be truncated if not paginated.
+
+**Pattern:** Increment `startRow` by `rowLimit` on each subsequent request. Stop when the response returns fewer rows than `rowLimit`.
+
+```python
+def fetch_all_rows(session, encoded_site_url, body):
+    """Paginate searchAnalytics.query to retrieve all rows."""
+    url = f"https://www.googleapis.com/webmasters/v3/sites/{encoded_site_url}/searchAnalytics/query"
+    page_size = 25_000
+    start_row = 0
+    all_rows = []
+
+    while True:
+        page_body = {**body, "rowLimit": page_size, "startRow": start_row}
+        resp = session.post(url, json=page_body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        rows = data.get("rows", [])  # absent key = zero results
+        all_rows.extend(rows)
+
+        if len(rows) < page_size:
+            break  # fewer rows than requested = last page
+
+        start_row += page_size
+
+    return all_rows
+```
+
+**Detecting truncation without full pagination:**
+If you only want to detect whether results were truncated (not fetch all), check `len(response["rows"]) == rowLimit`. If true, there may be more rows.
+
+**rowLimit max:** 25,000. Values above this return HTTP 400.
+
+**startRow offset:** Zero-based. Page 1 = `startRow: 0`; page 2 = `startRow: 25000`; page N = `startRow: (N-1) * 25000`.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+
+---
+
+### dimensionFilterGroups
+
+Server-side filtering applied before aggregation and before `rowLimit` is enforced. Use this to avoid fetching all rows and filtering client-side — critical for large sites where unfiltered results exceed 25,000 rows.
+
+**Top-level structure:**
+
+```json
+"dimensionFilterGroups": [
+  {
+    "groupType": "AND",
+    "filters": [
+      {
+        "dimension":  "query",
+        "operator":   "contains",
+        "expression": "tesla"
+      },
+      {
+        "dimension":  "device",
+        "operator":   "equals",
+        "expression": "MOBILE"
+      }
+    ]
+  },
+  {
+    "groupType": "AND",
+    "filters": [
+      {
+        "dimension":  "page",
+        "operator":   "includingRegex",
+        "expression": ".*/collections/.*"
+      }
+    ]
+  }
+]
+```
+
+**Logic:**
+- Filters within a single group are **ANDed** together (`groupType: "AND"` is the only supported value).
+- Multiple groups in `dimensionFilterGroups[]` are **ORed** together (a row matches if it satisfies any group).
+
+**Filter object fields:**
+
+| Field | Type | Valid values |
+|---|---|---|
+| `dimension` | string | `"country"`, `"device"`, `"page"`, `"query"`, `"searchAppearance"` |
+| `operator` | string | `"equals"`, `"notEquals"`, `"contains"`, `"notContains"`, `"includingRegex"`, `"excludingRegex"` |
+| `expression` | string | The filter value; case-insensitive for `contains`/`equals`/`notContains`/`notEquals`; RE2 syntax for regex operators |
+
+**Operator notes:**
+- `equals` / `notEquals` — exact match (case-insensitive).
+- `contains` / `notContains` — substring match (case-insensitive).
+- `includingRegex` / `excludingRegex` — RE2 regex; partial match (anchoring with `^`/`$` if needed).
+- `dimension` in a filter does not need to be listed in `dimensions[]` — you can filter on a dimension you are not grouping by.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+
+---
+
+### Sites API
+
+Manages which properties (sites) are verified in Search Console.
+
+**Base URL:** `https://www.googleapis.com/webmasters/v3`
+
+| Operation | Method + Path | Auth |
+|---|---|---|
+| List all properties | `GET /sites` | readonly |
+| Get a single property | `GET /sites/{siteUrl*}` | readonly |
+| Add a property | `PUT /sites/{siteUrl*}` | write |
+| Delete a property | `DELETE /sites/{siteUrl*}` | write |
+
+`*` = `siteUrl` must be percent-encoded in the path.
+
+**siteEntry schema (from list response):**
+
+```json
+{
+  "siteUrl":         "https://shop.talas.ae/",
+  "permissionLevel": "siteOwner"
+}
+```
+
+**permissionLevel enum:**
+
+| Value | Description |
+|---|---|
+| `siteOwner` | Full owner — can manage users, verification, all data |
+| `siteFullUser` | Full data access; cannot manage verification |
+| `siteRestrictedUser` | Limited data access |
+| `siteUnverifiedUser` | Site listed but not verified |
+
+**Edge cases:**
+- `sites.list` response has no `siteEntry` key (not an empty array) when the user has no verified sites. Always use `.get("siteEntry", [])`.
+- `sites.add` (PUT) does not verify the property — it only registers the intent. Actual verification happens through the Search Console UI or DNS/HTML methods.
+- `sites.delete` removes the property from the user's Search Console account. It does NOT remove other users' access.
+
+Source: https://developers.google.com/webmaster-tools/v1/sites/list
+
+---
+
+### Sitemaps API
+
+Manages submitted sitemaps for a verified property.
+
+**Base URL:** `https://www.googleapis.com/webmasters/v3`
+
+| Operation | Method + Path | Auth |
+|---|---|---|
+| List sitemaps | `GET /sites/{siteUrl*}/sitemaps` | readonly |
+| Get a sitemap | `GET /sites/{siteUrl*}/sitemaps/{feedpath*}` | readonly |
+| Submit a sitemap | `PUT /sites/{siteUrl*}/sitemaps/{feedpath*}` | write |
+| Delete a sitemap | `DELETE /sites/{siteUrl*}/sitemaps/{feedpath*}` | write |
+
+`*` = percent-encoded in the path. `{feedpath}` is the full URL of the sitemap (e.g., `https%3A%2F%2Fshop.talas.ae%2Fsitemap.xml`).
+
+**Sitemap entry schema:**
+
+```json
+{
+  "path":           "https://shop.talas.ae/sitemap.xml",
+  "lastSubmitted":  "2026-04-10T08:12:00.000Z",
+  "isPending":      false,
+  "isSitemapIndex": true,
+  "type":           "sitemap",
+  "lastDownloaded": "2026-06-21T03:44:00.000Z",
+  "warnings":       "0",
+  "errors":         "0",
+  "contents": [
+    {
+      "type":      "web",
+      "submitted": "1240",
+      "indexed":   "987"
+    }
+  ]
+}
+```
+
+**Fields:**
+- `warnings` and `errors` are string-encoded integers (not numbers).
+- `contents[].submitted` and `contents[].indexed` are also strings.
+- `isSitemapIndex: true` means this is a sitemap index file pointing to child sitemaps.
+- `isPending: true` means Google has not yet downloaded/processed the sitemap.
+- `type` on the root object is always `"sitemap"`.
+- `contents[].type` values: `"web"`, `"image"`, `"video"`, `"news"`.
+
+**Optional query parameter for list:**
+`sitemapIndex` (string, URL-encoded) — filters to sitemaps nested under a specific sitemap index.
+
+Source: https://developers.google.com/webmaster-tools/v1/sitemaps/list
+
+---
+
+### URL Inspection API
+
+Inspects the index status, AMP validity, mobile usability, and rich result eligibility of a specific URL.
+
+**Base URL:** `https://searchconsole.googleapis.com/v1` (different from all other GSC endpoints)
+
+**Endpoint:** `POST /urlInspection/index:inspect`
+
+**Request schema:**
+
+```json
+{
+  "inspectionUrl": "https://shop.talas.ae/products/tesla-m3-door-panel",
+  "siteUrl":       "https://shop.talas.ae/",
+  "languageCode":  "en-US"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `inspectionUrl` | string | Yes | Full URL of the page to inspect; must be within `siteUrl` property |
+| `siteUrl` | string | Yes | Verified Search Console property; goes in JSON body — NOT percent-encoded |
+| `languageCode` | string | No | BCP-47 (e.g., `"en-US"`, `"ar"`); affects response language |
+
+**Response schema:**
+
+```json
+{
+  "inspectionResult": {
+    "inspectionResultLink": "https://search.google.com/search-console/inspect?resource_id=...",
+    "indexStatusResult": {
+      "verdict":        "PASS",
+      "coverageState":  "Submitted and indexed",
+      "robotsTxtState": "ALLOWED",
+      "indexingState":  "INDEXING_ALLOWED",
+      "lastCrawlTime":  "2026-06-18T14:32:00Z",
+      "pageFetchState": "SUCCESSFUL",
+      "googleCanonical":"https://shop.talas.ae/products/tesla-m3-door-panel",
+      "userCanonical":  "https://shop.talas.ae/products/tesla-m3-door-panel",
+      "sitemap":        ["https://shop.talas.ae/sitemap.xml"],
+      "referringUrls":  ["https://shop.talas.ae/collections/tesla"],
+      "crawledAs":      "DESKTOP"
+    },
+    "ampResult": {
+      "verdict": "NOT_APPLICABLE"
+    },
+    "mobileUsabilityResult": {
+      "verdict": "PASS",
+      "issues":  []
+    },
+    "richResultsResult": {
+      "verdict":    "NEUTRAL",
+      "detectedItems": []
+    }
+  }
+}
+```
+
+**coverageState enum (indexStatusResult.coverageState):** Human-readable string; key states include:
+- `"Submitted and indexed"` — indexed and in sitemap
+- `"Crawled - currently not indexed"` — crawled but Google chose not to index
+- `"Discovered - currently not indexed"` — known but not yet crawled
+- `"Excluded by 'noindex' tag"` — blocked by meta/header
+- `"Blocked by robots.txt"` — blocked by robots
+- `"Redirect error"` — redirect chain issue
+- `"Soft 404"` — page returns 200 but appears to have no content
+
+**verdict enum:** `"PASS"`, `"FAIL"`, `"NEUTRAL"`, `"VERDICT_UNSPECIFIED"`
+
+**indexingState enum:** `"INDEXING_ALLOWED"`, `"BLOCKED_BY_META_TAG"`, `"BLOCKED_BY_HTTP_HEADER"`, `"BLOCKED_BY_ROBOTS_TXT"`
+
+**pageFetchState enum:** `"SUCCESSFUL"`, `"SOFT_404"`, `"BLOCKED_ROBOTS_TXT"`, `"NOT_FOUND"`, `"SERVER_ERROR"`, `"REDIRECT_ERROR"`, `"ACCESS_DENIED"`, `"BLOCKED_4XX"`
+
+**crawledAs enum:** `"DESKTOP"`, `"MOBILE"`, `"CRAWLED_AS_UNSPECIFIED"`
+
+Source: https://developers.google.com/webmaster-tools/v1/urlInspection.index/inspect
+
+---
+
+### OAuth Requirements
+
+| Scope | Required for |
+|---|---|
+| `https://www.googleapis.com/auth/webmasters.readonly` | All read operations: searchAnalytics.query, sites.list, sites.get, sitemaps.list, sitemaps.get, urlInspection.index.inspect |
+| `https://www.googleapis.com/auth/webmasters` | All write operations: sites.add, sites.delete, sitemaps.submit, sitemaps.delete |
+
+**Notes:**
+- The scope URIs retain the `webmasters` name even under the `searchconsole` v1 discovery name — there are no new scope URIs.
+- Both scopes can be requested simultaneously; the broader `webmasters` scope implicitly grants `webmasters.readonly` access.
+- For the URL Inspection API, `webmasters.readonly` is sufficient (inspection is a read operation despite using POST).
+- If only `webmasters.readonly` is granted, any mutating call (`sites.add`, `sitemaps.submit`, etc.) returns HTTP 403.
+
+The `gads-cli/generate_token.py` requests `webmasters.readonly` (as of v3.4.0+). To enable write operations, add `webmasters` to SCOPES and regenerate the token.
+
+Source: https://developers.google.com/webmaster-tools/v1/how-tos/authorizing
+
+---
+
+### Rate Limits
+
+| Resource | Quota dimension | Limit |
+|---|---|---|
+| Search Analytics | Per-site QPM | 1,200 |
+| Search Analytics | Per-user QPM | 1,200 |
+| Search Analytics | Per-project QPM | 40,000 |
+| Search Analytics | Per-project QPD | 30,000,000 |
+| URL Inspection | Per-site QPD | 2,000 |
+| URL Inspection | Per-site QPM | 600 |
+| URL Inspection | Per-project QPM | 15,000 |
+| URL Inspection | Per-project QPD | 10,000,000 |
+| Sites, Sitemaps | Per-user QPS | 20 |
+| Sites, Sitemaps | Per-user QPM | 200 |
+| Sites, Sitemaps | Per-project QPD | 100,000,000 |
+
+**429 handling pattern:**
+
+```python
+import time
+
+def post_with_retry(session, url, body, max_retries=5):
+    backoff = 1.0
+    for attempt in range(max_retries):
+        resp = session.post(url, json=body)
+        if resp.status_code == 429:
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 60)
+            continue
+        resp.raise_for_status()
+        return resp.json()
+    raise RuntimeError(f"Exceeded {max_retries} retries due to rate limiting")
+```
+
+Key points:
+- Exponential backoff with cap (60 seconds is a reasonable ceiling).
+- 429 `Retry-After` header may be present; use it if provided.
+- The quota limit name in the 429 body (e.g., `DEFAULT-1MIN-SITE`) identifies which dimension was exceeded.
+
+Source: https://developers.google.com/webmaster-tools/limits
+
+---
+
+### Date Range Limits
+
+| Aspect | Detail |
+|---|---|
+| Maximum historical range | ~16 months (data older than ~16 months is not returned) |
+| Most recent data with `dataState: "final"` | ~3 days lag (data from last 2-3 days excluded) |
+| Most recent data with `dataState: "all"` | Near-real-time (within hours) but values will change |
+| Hourly data (`dataState: "hourly_all"`) | Available for recent dates only; exact cutoff not documented |
+| Date field format | YYYY-MM-DD (Pacific Time) |
+
+**Practical implications:**
+- `startDate` more than ~16 months ago: API returns data only from within the 16-month window, silently ignoring older dates (does not return an error).
+- Date comparisons (YoY, MoM) are reliable only within the 16-month window.
+- For freshness-sensitive use cases (e.g., "did my page disappear from results today?"), use `dataState: "all"` and treat values as preliminary.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+
+---
+
+### Best Practices
+
+**1. Always paginate with rowLimit=25000 + startRow loop.**
+Never assume a single request returns all data. For any query with broad dimensions (especially `query` alone over a busy site), results can exceed 25,000 rows. Use the pagination pattern in the Pagination section above.
+
+```python
+# Correct pattern
+body = {"startDate": "...", "endDate": "...", "dimensions": ["query"], "rowLimit": 25000, "startRow": 0}
+all_rows = fetch_all_rows(session, encoded_site_url, body)
+```
+
+**2. Use `BY_PAGE` aggregationType for URL-level analysis.**
+When you need to know how individual pages perform (which URLs rank, for which queries), set `aggregationType: "BY_PAGE"` — but only when `page` is NOT in `dimensions[]`. If `page` is in dimensions, the API applies `BY_PAGE` automatically (or use `AUTO`).
+
+**3. Use `BY_PROPERTY` for site-level totals.**
+When computing site-wide click/impression totals for reporting, use `aggregationType: "BY_PROPERTY"` to avoid double-counting pages that appear under multiple sub-properties.
+
+**4. Use server-side `dimensionFilterGroups` instead of client-side filtering.**
+Filtering client-side after fetching all rows wastes quota and hits the 25,000-row truncation limit. Apply `dimensionFilterGroups` to get only the rows you need, then paginate only what passes the filter.
+
+```python
+# Prefer this (server-side)
+body["dimensionFilterGroups"] = [{"groupType": "AND", "filters": [{"dimension": "query", "operator": "contains", "expression": "tesla"}]}]
+
+# Over this (client-side)
+rows = [r for r in all_rows if "tesla" in r["keys"][0]]
+```
+
+**5. Percent-encode `siteUrl` in path parameters; never encode in JSON bodies.**
+- Path parameter (`/sites/{siteUrl}`): always `urllib.parse.quote(site_url, safe='')`.
+- JSON body (`inspectionUrl` request): use the raw URL string, no encoding.
+
+**6. Handle absent keys defensively.**
+- `rows` key is absent when zero results: use `.get("rows", [])`.
+- `siteEntry` key is absent when no sites: use `.get("siteEntry", [])`.
+- `mobileUsabilityResult.issues` may be absent or empty: use `.get("issues", [])`.
+
+**7. Respect `dataState: "final"` for decisions.**
+Use `dataState: "final"` (the default) for all performance analysis and budget/bid decisions. The 3-day lag is expected behavior, not a data problem. Only use `"all"` for trend-spotting with explicit caveat.
+
+**8. Match `siteUrl` exactly as returned by `sites.list`.**
+Trailing slashes, protocol, and subdomain matter. `https://shop.talas.ae/` and `https://shop.talas.ae` are different properties. Retrieve the authoritative form via `sites.list` and store it verbatim.
+
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query

@@ -1,3 +1,9 @@
+"""Google Ads REST API client.
+
+API: Google Ads REST API
+KB reference: kb/google-ads.md (relative to gads-cli root)
+Official docs: https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/
+"""
 import re
 import click
 import requests
@@ -27,6 +33,7 @@ def sanitize_keyword(keyword):
     return sanitized
 
 
+# KB: kb/google-ads.md § searchStream | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/searchStream
 def run_gaql(creds, query):
     """Execute a GAQL query via the REST searchStream endpoint."""
     resp = requests.post(
@@ -46,6 +53,7 @@ def run_gaql(creds, query):
     return results
 
 
+# KB: kb/google-ads.md § search | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/search
 def ads_search(creds, query):
     """Execute a GAQL query via the REST search endpoint (paginated).
     
@@ -81,6 +89,7 @@ def ads_search(creds, query):
     return results
 
 
+# KB: kb/google-ads.md § mutate | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/mutate
 def ads_mutate(creds, resource_path, operations):
     """Single-resource mutate operation.
     
@@ -103,6 +112,7 @@ def ads_mutate(creds, resource_path, operations):
     return resp.json()
 
 
+# KB: kb/google-ads.md § batch-mutate | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/mutate
 def ads_batch_mutate(creds, mutate_operations):
     """Cross-resource batch mutate operation.
     
@@ -126,6 +136,7 @@ def ads_batch_mutate(creds, mutate_operations):
     return resp.json()
 
 
+# KB: kb/google-ads.md § conversion-upload | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/uploadClickConversions
 def ads_upload_click_conversions(creds, conversions, conversion_action_id):
     """Upload click conversions.
     
@@ -159,6 +170,7 @@ def ads_upload_click_conversions(creds, conversions, conversion_action_id):
     return resp.json()
 
 
+# KB: kb/google-ads.md § keyword-ideas | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/generateKeywordIdeas
 def generate_keyword_ideas(creds, keywords=None, url=None, language_id="1000", geo_ids=None):
     """Generate keyword ideas.
 
@@ -206,6 +218,7 @@ def generate_keyword_ideas(creds, keywords=None, url=None, language_id="1000", g
     return resp.json()
 
 
+# KB: kb/google-ads.md § keyword-forecast | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/generateKeywordForecastMetrics
 def generate_keyword_forecast(creds, keywords, language_id="1000", geo_ids=None):
     """Generate keyword forecast metrics.
 
@@ -343,6 +356,7 @@ def _build_user_op(phone=None, email=None, first_name=None, last_name=None, coun
     return {"create": {"userIdentifiers": ids}}
 
 
+# KB: kb/google-ads.md § customer-match | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers.userLists
 def audience_find_list(creds, name):
     """Find a user list by name. Returns resource_name or None."""
     results = run_gaql(creds, f"SELECT user_list.resource_name FROM user_list WHERE user_list.name = '{name}'")
@@ -351,6 +365,7 @@ def audience_find_list(creds, name):
     return None
 
 
+# KB: kb/google-ads.md § customer-match | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers.userLists/mutate
 def audience_create_list(creds, name, description="", life_span=540):
     """Create a CRM-based Customer Match user list."""
     op = {"create": {
@@ -366,6 +381,7 @@ def audience_create_list(creds, name, description="", life_span=540):
     return ads_mutate(creds, "userLists", [op])
 
 
+# KB: kb/google-ads.md § offline-user-data-jobs | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers.offlineUserDataJobs
 def audience_upload_csv(creds, list_resource_name, csv_path, batch_size=100, max_rows=None):
     """Upload a CSV file to a Customer Match list.
 

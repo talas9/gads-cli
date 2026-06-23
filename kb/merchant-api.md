@@ -1468,3 +1468,1041 @@ All claims in this document are sourced from the following URLs, fetched 2026-06
 - Exact `onlineReturnPolicies` object shape — full schema not fetched (404); shape above derived from accounts_v1 discovery doc summary.
 - Exact `issues` response field names (specifically `impactedDestinations` nesting depth) — primary source is CLI source code docstring + accounts overview; dedicated issues reference page 404d.
 - Reports query field names in `product_view` and `product_performance_view` (e.g. `price_micros`, `item_issues`) — derived from discovery doc table names and overview content; the exact field lists require the full reports discovery doc schema.
+
+
+---
+
+## Developer Guide
+
+> Sources: https://developers.google.com/merchant/api, https://developers.google.com/shopping-content, https://developers.google.com/merchant/api/reference/rest, https://developers.google.com/merchant/api/guides
+
+---
+
+### 1. Merchant API vs Legacy Content API — Key Differences and Migration
+
+#### Why the new API exists
+
+The Content API for Shopping (v2.1) was a monolithic API with a single base URL and tightly coupled resources. The Merchant API redesigns the surface into purpose-built sub-APIs, each independently versioned and deployable. This allows Google to iterate on (say) the Reports surface without impacting the Products surface.
+
+#### Timeline
+
+| Milestone | Date |
+|-----------|------|
+| Merchant API v1 GA announced | 2024 |
+| Merchant API v1beta discontinued | February 28, 2026 |
+| Content API for Shopping v2.1 sunset | **August 18, 2026** |
+
+Source: https://developers.google.com/merchant/api/overview, https://developers.google.com/shopping-content/guides/quickstart
+
+#### Migration table — endpoint-by-endpoint
+
+| Operation | Content API v2.1 | Merchant API v1 |
+|-----------|-----------------|-----------------|
+| Base URL | `https://shoppingcontent.googleapis.com/content/v2.1/{merchantId}/` | `https://merchantapi.googleapis.com/{sub-api}/v1/accounts/{merchantId}/` |
+| List products | `GET /{merchantId}/products` | `GET products/v1/accounts/{merchantId}/products` |
+| Insert product | `POST /{merchantId}/products` | `POST products/v1/accounts/{merchantId}/productInputs:insert?dataSource=...` |
+| Patch product | `PATCH /{merchantId}/products/{id}` | `PATCH products/v1/accounts/{merchantId}/productInputs/{id}?dataSource=...&updateMask=...` |
+| Delete product | `DELETE /{merchantId}/products/{id}` | `DELETE products/v1/accounts/{merchantId}/productInputs/{id}?dataSource=...` |
+| Product status | `GET /{merchantId}/productstatuses/{id}` | Embedded in `products` resource under `productStatus.*` — no separate resource |
+| List feeds | `GET /{merchantId}/datafeeds` | `GET datasources/v1/accounts/{merchantId}/dataSources` |
+| Create feed | `POST /{merchantId}/datafeeds` | `POST datasources/v1/accounts/{merchantId}/dataSources` |
+| Shipping settings | `GET /{merchantId}/shippingsettings/{merchantId}` | `GET accounts/v1/accounts/{merchantId}/shippingSettings` |
+| Return policies | `GET /{merchantId}/returnpolicy` | `GET accounts/v1/accounts/{merchantId}/onlineReturnPolicies` |
+| Account info | `GET /{merchantId}/accounts/{merchantId}` | `GET accounts/v1/accounts/{merchantId}` |
+| Account issues | `GET /{merchantId}/accountstatuses/{merchantId}` | `GET accounts/v1/accounts/{merchantId}/issues` |
+| Batch insert products | `POST /{merchantId}/products/batch` | No batch endpoint — use file data sources, or insert serially |
+| Reports / performance | `GET /{merchantId}/reports/search` (Reports API) | `POST reports/v1/accounts/{merchantId}/reports:search` |
+
+#### Field renames
+
+| Content API v2.1 field | Merchant API v1 field | Notes |
+|------------------------|----------------------|-------|
+| `product.id` | `offerId` | The merchant-assigned SKU string |
+| `product.offerId` | `offerId` | Unchanged name, now the primary identifier |
+| `price.value` (string) | `price.amountMicros` (int64) | Multiply AED price by 1,000,000 |
+| `price.currency` | `price.currencyCode` | ISO 4217 three-letter code |
+| `datafeed.id` | `dataSource.dataSourceId` | int64 string |
+| `datafeed.name` | `dataSource.displayName` | |
+| `productStatus.productId` | (encoded in `name` path segment) | `products/{encodedId}` |
+| `shippingSettings.services[].name` | `services[].serviceName` | |
+
+#### What was removed or consolidated
+
+- **`productstatuses` resource removed.** Product status is now folded into the `products` read resource under `productStatus.destinationStatuses` and `productStatus.itemLevelIssues`. There is no separate endpoint.
+- **Batch product insert removed.** The Content API supported `POST /products/batch`. The Merchant API has no equivalent single-call batch. Use file data sources (PRIMARY feed type) for bulk uploads, or insert products individually via `productInputs:insert`.
+- **`accounts.authinfo` removed.** Use `GET accounts/v1/accounts` or the account-level methods instead.
+- **Sub-accounts via `accounts.list` still available** — see section 10 below.
+
+#### Authentication — no change
+
+The OAuth scope is identical between Content API v2.1 and Merchant API v1:
+
+```
+https://www.googleapis.com/auth/content
+```
+
+No token regeneration is required for the migration. The existing token from `generate_token.py` works on all Merchant API v1 endpoints.
+
+Source: https://developers.google.com/merchant/api/overview#auth
+
+---
+
+### 2. Product Schema — Required and Optional Fields
+
+The product schema lives on the `productAttributes` object within a `ProductInput`. The full schema reference is in the products_v1 discovery doc.
+
+#### Required fields (without these, products will be disapproved)
+
+| Field | Type | Constraint | Example |
+|-------|------|-----------|---------|
+| `offerId` | string | Stable SKU; unique per data source; max 50 chars | `"TeslaModel3RearBumper-Used-001"` |
+| `contentLanguage` | string | ISO 639-1 two-letter code; immutable after first insert | `"en"` |
+| `feedLabel` | string | Country/feed label; max 20 chars; immutable | `"AE"` |
+| `productAttributes.title` | string | Max 150 chars; no ALL-CAPS; no promotional phrases | `"Tesla Model 3 Rear Bumper — Used OEM"` |
+| `productAttributes.description` | string | Max 5000 chars | `"Original Tesla Model 3..."` |
+| `productAttributes.link` | string | HTTPS; canonical product URL | `"https://shop.talas.ae/products/..."` |
+| `productAttributes.imageLink` | string | HTTPS; JPEG/PNG/GIF/WEBP; min 100×100px recommended 800×800 | `"https://cdn.talas.ae/images/..."` |
+| `productAttributes.availability` | string enum | See section 3 | `"in_stock"` |
+| `productAttributes.condition` | string enum | See section 4 | `"used"` |
+| `productAttributes.price` | object | `{amountMicros, currencyCode}` | `{"amountMicros":"450000000","currencyCode":"AED"}` |
+
+#### Strongly recommended (disapproval risk or ranking loss without them)
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `productAttributes.brand` | string | Required for most clothing + electronics categories; strongly recommended everywhere |
+| `productAttributes.gtin` or `productAttributes.gtins` | string / string[] | Required for products with assigned GTINs; omit only if none assigned |
+| `productAttributes.mpn` | string | Manufacturer part number; critical for auto parts matching |
+| `productAttributes.googleProductCategory` | string | Google taxonomy numeric ID or full string path |
+| `productAttributes.itemGroupId` | string | Groups color/size variants; required for variant listings |
+| `productAttributes.additionalImageLinks` | string[] | Up to 10 additional image URLs |
+
+#### Optional fields (improve ranking, coverage, or targeting)
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `productAttributes.productTypes` | string[] | Merchant's own taxonomy; up to 5 levels with ` > ` separator |
+| `productAttributes.shipping` | ShippingObject[] | Per-product shipping overrides; if absent, account-level shipping rules apply |
+| `productAttributes.shippingWeight` | object | Used for carrier-calculated rates |
+| `productAttributes.shippingLength/Width/Height` | object | Dimensions for shipping rate calculation |
+| `productAttributes.salePrice` | object | Sale price (must be lower than `price`) |
+| `productAttributes.salePriceEffectiveDate` | string | ISO 8601 interval for sale price |
+| `productAttributes.ageGroup` | string | `newborn`, `infant`, `toddler`, `kids`, `adult` |
+| `productAttributes.gender` | string | `male`, `female`, `unisex` |
+| `productAttributes.color` | string | Color description |
+| `productAttributes.size` | string | Product size |
+| `productAttributes.material` | string | Material description |
+| `productAttributes.pattern` | string | Pattern description |
+| `productAttributes.loyaltyPoints` | object | Loyalty program points |
+| `productAttributes.productHighlights` | string[] | Up to 10 bullet-point highlights |
+| `productAttributes.includedDestinations` | string[] | Restrict which surfaces this product appears on |
+| `productAttributes.excludedDestinations` | string[] | Exclude specific surfaces |
+| `customAttributes` | array | `[{"name":"key","value":"val"}]` — pass-through custom data |
+| `versionNumber` | int64 | Freshness guard; reject insert if existing version is higher |
+
+#### productType taxonomy
+
+`productTypes` uses the merchant's own category hierarchy, not Google's taxonomy. Each string in the array represents one category path using ` > ` as the level separator:
+
+```json
+{
+  "productTypes": [
+    "Auto Parts > Body Parts > Bumpers",
+    "Tesla Parts > Model 3 > Exterior"
+  ]
+}
+```
+
+Rules:
+- Up to 5 strings per product
+- Each path can have multiple levels separated by ` > `
+- These appear as filters in Google Merchant Center reports
+- Distinct from `googleProductCategory` which must use Google's taxonomy
+
+`googleProductCategory` example values for auto parts:
+
+| Category | Numeric ID |
+|----------|------------|
+| Vehicles & Parts > Vehicle Parts & Accessories | 5613 |
+| Vehicles & Parts > Vehicle Parts & Accessories > Motor Vehicle Parts | 899 |
+| Vehicles & Parts > Vehicle Parts & Accessories > Motor Vehicle Body Parts | 2768 |
+
+Full taxonomy: https://www.google.com/basepages/producttype/taxonomy-with-ids.en-US.txt
+
+---
+
+### 3. Availability Values
+
+The `productAttributes.availability` field accepts a controlled vocabulary. Values are lowercase strings.
+
+| Value | Meaning | Shopping Ads impact |
+|-------|---------|-------------------|
+| `"in_stock"` | Product is available now | Eligible for all surfaces |
+| `"out_of_stock"` | Product is not currently available | Can still appear but labeled; may reduce impression share |
+| `"preorder"` | Not yet released; can be ordered in advance | Requires `availabilityDate` field |
+| `"backorder"` | Temporarily out of stock; will ship when available | Should include expected availability date |
+
+Additional notes:
+- `availabilityDate` (optional ISO 8601 string) should accompany `preorder` and `backorder` values
+- Mismatching availability (API says `in_stock`, landing page says sold out) is a policy violation and causes disapproval
+- The read-only `productStatus` in the `products` resource returns these values in uppercase: `IN_STOCK`, `OUT_OF_STOCK`, etc.
+
+Source: https://support.google.com/merchants/answer/6324448
+
+---
+
+### 4. Condition Values
+
+The `productAttributes.condition` field accepts exactly three values:
+
+| Value | Meaning | Notes for Talas |
+|-------|---------|----------------|
+| `"new"` | Brand new, never used, in original packaging | New aftermarket parts |
+| `"refurbished"` | Professionally restored, may come with a warranty | Remanufactured parts |
+| `"used"` | Previously used; may show wear | OEM used / pulled parts |
+
+Rules:
+- `condition` is **required** for all products
+- For used auto parts, always use `"used"` — Google audits product condition vs. landing page content
+- Do not use `"used"` for aftermarket new parts even if they are lower quality than OEM — that would be inaccurate
+- The Talas PARTS ONLY rule: condition should reflect the actual physical state of the part, not the seller
+
+Source: https://support.google.com/merchants/answer/6324350
+
+---
+
+### 5. Feed Management — Data Source Types, Fetch Schedules, File Formats
+
+#### Data source types
+
+A data source (`DataSource` object) tells Merchant Center where to get product data and how. The `type` of a data source is implied by which sub-object is present in the `DataSource` payload:
+
+| Sub-object present | Type | Description |
+|-------------------|------|-------------|
+| `primaryProductDataSource` | PRIMARY | Main product feed; one per language/country combo |
+| `supplementalProductDataSource` | SUPPLEMENTAL | Overrides/supplements the primary feed; linked by `offerId` match |
+| `localInventoryDataSource` | LOCAL_INVENTORY | In-store availability for local listings |
+| `regionalInventoryDataSource` | REGIONAL_INVENTORY | Region-level price/availability overrides |
+| `promotionDataSource` | PROMOTION | Promotions feed |
+| `productReviewDataSource` | PRODUCT_REVIEW | User-submitted product reviews |
+| `merchantReviewDataSource` | MERCHANT_REVIEW | User-submitted merchant reviews |
+
+The `input` field (read-only) reflects how the data source receives updates:
+
+| `input` value | Meaning |
+|---------------|---------|
+| `API` | Products submitted via `productInputs:insert` / `productInputs:patch` |
+| `FILE` | Products in a file (TSV, XML, or Google Sheets) fetched or uploaded |
+| `UI` | Products added manually in Merchant Center UI |
+| `AUTOFEED` | Google auto-detects products from the website |
+
+#### Fetch schedule
+
+For `FILE` data sources with `fileInputType = FETCH`, configure `fetchSettings`:
+
+```json
+{
+  "fetchSettings": {
+    "frequency": "DAILY",
+    "fetchUri": "https://shop.talas.ae/feeds/google-shopping.xml",
+    "enabled": true,
+    "timeOfDay": {
+      "hours": 2,
+      "minutes": 0,
+      "seconds": 0,
+      "nanos": 0
+    },
+    "timeZone": "Asia/Dubai",
+    "username": "",
+    "password": ""
+  }
+}
+```
+
+`frequency` options:
+
+| Value | Description |
+|-------|-------------|
+| `DAILY` | Fetches once per day at `timeOfDay` |
+| `WEEKLY` | Fetches once per week; requires `dayOfWeek` field |
+| `MONTHLY` | Fetches once per month; requires `dayOfMonth` field (1-31) |
+
+To trigger an immediate fetch outside the schedule:
+```http
+POST datasources/v1/accounts/{merchantId}/dataSources/{dataSourceId}:fetch
+```
+(No request body required.)
+
+#### File format requirements
+
+**TSV (Tab-Separated Values):**
+- First row must be column headers matching Google's attribute names (e.g. `id`, `title`, `description`, `link`, `image link`, `condition`, `availability`, `price`, `brand`, `gtin`, `mpn`)
+- UTF-8 encoding
+- One product per row
+- Price format: `450.00 AED` (value + space + ISO currency)
+- No quoted strings required unless field contains tab characters
+
+**XML:**
+- Uses RSS 2.0 format with Google namespace
+- Root element: `<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">`
+- Each product in a `<item>` element
+- Price element: `<g:price>450.00 AED</g:price>`
+
+**Google Sheets:**
+- Create a sheet with headers in row 1 matching TSV column names
+- Share the sheet with `content-api@system.gserviceaccount.com` (view access)
+- `fileInputType` will be `GOOGLE_SHEETS`; set `fetchUri` to the sheet's published CSV URL
+
+Source: https://support.google.com/merchants/answer/160567 (feed specification)
+
+---
+
+### 6. Shipping Setup
+
+Shipping is configured via `accounts/{merchantId}/shippingSettings`. The full config is a single object with `services[]` and `warehouses[]`.
+
+#### Service configuration components
+
+**DeliveryTime:**
+```json
+{
+  "deliveryTime": {
+    "minHandlingDays": 0,
+    "maxHandlingDays": 1,
+    "minTransitDays": 2,
+    "maxTransitDays": 5,
+    "cutoffTime": {
+      "hour": 14,
+      "minute": 0,
+      "timezone": "Asia/Dubai"
+    }
+  }
+}
+```
+
+- `handlingDays` = time to pack and hand to carrier
+- `transitDays` = carrier transit time
+- `cutoffTime` = orders placed after this time start handling the next business day
+
+**Transit time labels** — assign named transit time windows to carrier services:
+```json
+{
+  "transitTimeTable": {
+    "postalCodeGroupNames": ["UAE_NORTH", "UAE_SOUTH"],
+    "transitTimeLabels": ["STANDARD", "EXPRESS"],
+    "rows": [
+      {"values": [{"minTransitDays": 2, "maxTransitDays": 3}, {"minTransitDays": 1, "maxTransitDays": 1}]},
+      {"values": [{"minTransitDays": 3, "maxTransitDays": 5}, {"minTransitDays": 2, "maxTransitDays": 2}]}
+    ]
+  }
+}
+```
+
+#### Rate structures
+
+**Flat rate (simplest):**
+```json
+{
+  "rateGroups": [
+    {
+      "singleValue": {
+        "flatRate": {
+          "amountMicros": "0",
+          "currencyCode": "AED"
+        }
+      },
+      "name": "Free Shipping AE"
+    }
+  ]
+}
+```
+
+**CarrierRate (carrier-calculated):**
+```json
+{
+  "carrierRates": [
+    {
+      "name": "Aramex Standard",
+      "carrierName": "Aramex",
+      "carrierService": "Standard",
+      "originPostalCode": "00000",
+      "percentageAdjustment": "0",
+      "flatAdjustment": {"amountMicros": "0", "currencyCode": "AED"}
+    }
+  ]
+}
+```
+
+**RateGroup with Table (matrix of conditions):**
+```json
+{
+  "rateGroups": [
+    {
+      "mainTable": {
+        "rowHeaders": {
+          "prices": [
+            {"amountMicros": "100000000", "currencyCode": "AED"},
+            {"amountMicros": "500000000", "currencyCode": "AED"}
+          ]
+        },
+        "columnHeaders": {"locations": [{"locationIds": ["21022"]}]},
+        "rows": [
+          {"cells": [{"flatRate": {"amountMicros": "25000000", "currencyCode": "AED"}}]},
+          {"cells": [{"flatRate": {"amountMicros": "0", "currencyCode": "AED"}}]}
+        ]
+      },
+      "name": "Tiered by order value"
+    }
+  ]
+}
+```
+
+Tables support rows keyed by: `prices` (order value breakpoints), `weights`, `number_of_items`, `location` (country/region/postal), or `time_zone`.
+
+**Important:** `shippingSettings:insert` is a full replace. Always GET the current config, modify in memory, then POST the full object including the `etag`.
+
+Source: https://developers.google.com/merchant/api/guides/shipping-settings/overview
+
+---
+
+### 7. Product Status
+
+Product status is embedded in the `products` read resource under `productStatus`. It is computed asynchronously — inserts/patches take minutes to reflect.
+
+#### destinationStatuses
+
+```json
+{
+  "destinationStatuses": [
+    {
+      "destination": "Shopping ads",
+      "approvedCountries": ["AE"],
+      "pendingCountries": [],
+      "disapprovedCountries": []
+    },
+    {
+      "destination": "Free listings",
+      "approvedCountries": [],
+      "pendingCountries": ["AE"],
+      "disapprovedCountries": []
+    }
+  ]
+}
+```
+
+**Destinations:**
+
+| Destination string | Surface |
+|-------------------|---------|
+| `"Shopping ads"` | Paid Shopping ads |
+| `"Free listings"` | Organic Shopping / Google Search free listings |
+| `"Buy on Google listings"` | Buy on Google (US only) |
+| `"Display ads"` | Google Display Network |
+
+#### itemLevelIssues — severity
+
+| Severity | Meaning | Impact |
+|----------|---------|--------|
+| `"ERROR"` | Hard disapproval — product cannot serve on this destination | Blocked |
+| `"SUGGESTION"` | Soft warning — product is approved but ranked lower | Eligible Limited |
+
+`resolution` values:
+
+| Value | Meaning |
+|-------|---------|
+| `"merchant_action"` | You must fix this (missing attribute, policy violation) |
+| `"pending_processing"` | Google is still processing; check back later |
+
+#### aggregatedDestinationStatus (in reports `product_view`)
+
+| Value | Meaning |
+|-------|---------|
+| `NOT_ELIGIBLE_OR_DISAPPROVED` | Blocked from all surfaces |
+| `NOT_ELIGIBLE` | Not eligible; no active disapproval |
+| `ELIGIBLE_LIMITED` | Approved with restrictions (e.g. missing GTIN) |
+| `ELIGIBLE` | Fully approved |
+
+---
+
+### 8. productInputs Write Path
+
+All product writes go through the `productInputs` sub-resource, not the `products` resource (which is read-only).
+
+#### Resource name format
+
+```
+accounts/{merchantId}/productInputs/{encodedId}
+```
+
+Where `{encodedId}` is the unpadded base64url of `contentLanguage~feedLabel~offerId`:
+
+```python
+import base64
+
+def encode_product_id(content_language: str, feed_label: str, offer_id: str) -> str:
+    raw = f"{content_language}~{feed_label}~{offer_id}"
+    return base64.urlsafe_b64encode(raw.encode()).rstrip(b"=").decode()
+
+# Example:
+# encode_product_id("en", "AE", "TeslaModel3RearBumper") -> "ZW4tQUUtVGVzbGFNb2RlbDNSZWFyQnVtcGVy"
+```
+
+Note: The tilde `~` character is used as the separator, not a hyphen.
+
+#### insert (POST)
+
+```
+POST products/v1/accounts/{merchantId}/productInputs:insert?dataSource=accounts/{merchantId}/dataSources/{dataSourceId}
+```
+
+- Idempotent on `(contentLanguage, feedLabel, offerId, dataSource)` tuple
+- Full replace of the product — unset fields are cleared
+- Requires an API-type data source (`input=API`)
+- `dataSource` query param must be the full resource name
+
+#### patch (PATCH)
+
+```
+PATCH products/v1/accounts/{merchantId}/productInputs/{encodedId}?dataSource=accounts/{merchantId}/dataSources/{dataSourceId}&updateMask=field1,field2
+```
+
+- Partial update — only fields listed in `updateMask` are modified
+- `updateMask` uses dotted field paths: `productAttributes.price`, `productAttributes.availability`
+- Fields not in the mask are untouched even if present in the body
+- Fields in the mask but absent from body are set to null
+
+Example update mask values:
+
+| Intent | updateMask value |
+|--------|-----------------|
+| Update price only | `productAttributes.price` |
+| Update availability + price | `productAttributes.price,productAttributes.availability` |
+| Update title and description | `productAttributes.title,productAttributes.description` |
+| Update all attributes | `productAttributes` (replaces entire attributes object) |
+
+#### delete (DELETE)
+
+```
+DELETE products/v1/accounts/{merchantId}/productInputs/{encodedId}?dataSource=accounts/{merchantId}/dataSources/{dataSourceId}
+```
+
+Returns `{}` (empty object). Deletion takes several minutes to propagate.
+
+#### Processing lag
+
+After any write operation, the processed `products` resource is **not immediately updated**. Allow 5-15 minutes for the change to reflect in `GET products/...`. The `versionNumber` field can be used to confirm which version of the product is currently processed.
+
+---
+
+### 9. Reports Sub-API
+
+The Reports sub-API uses a SQL-like query language called Merchant Query Language (MQL), analogous to GAQL in the Google Ads API.
+
+#### Endpoint
+
+```
+POST reports/v1/accounts/{merchantId}/reports:search
+Body: {"query": "SELECT ... FROM ... WHERE ... ORDER BY ... LIMIT ...", "pageSize": 1000}
+```
+
+#### Available report tables
+
+| Table | Primary use | Key dimensions | Key metrics |
+|-------|------------|----------------|-------------|
+| `product_view` | Inventory health, approvals, issues | `id`, `title`, `brand`, `feed_label`, `channel` | `aggregated_destination_status`, `item_issues` |
+| `product_performance_view` | Click/impression performance | `offer_id`, `title`, `brand`, `feed_label`, `date` | `clicks`, `impressions`, `click_through_rate`, `conversions`, `conversion_value` |
+| `price_competitiveness_product_view` | Price benchmarking | `offer_id`, `title`, `brand`, `country_of_sale` | `benchmark_price`, `price_difference_micros`, `price_difference_percent` |
+| `price_insights_product_view` | AI-driven price recommendations | `offer_id`, `title`, `brand` | `suggested_price`, `predicted_impressions_change_fraction`, `predicted_clicks_change_fraction` |
+| `best_sellers_brand_view` | Popular brands by category | `category_id`, `category_path`, `country_code`, `rank_type` | `rank`, `previous_rank` |
+| `best_sellers_product_cluster_view` | Popular product clusters | `title`, `category_id`, `country_code` | `rank`, `inventory_status`, `brand_inventory_status` |
+| `competitive_visibility_top_merchant_view` | Top competitor domains | `domain`, `category_id`, `country_code`, `date` | `ads_organic_ratio`, `page_overlap_rate`, `higher_listing_rate` |
+| `competitive_visibility_benchmark_view` | Category-level benchmarks | `category_id`, `country_code`, `date` | `traffic_source`, `your_domain_visibility_trend`, `category_benchmark_visibility_trend` |
+| `non_product_performance_view` | Image and link performance | `date`, `week`, `month` | `image_clicks`, `link_clicks` |
+
+#### Query syntax details
+
+```sql
+-- Date filtering (use explicit dates, not TODAY keyword)
+SELECT offer_id, clicks, impressions
+FROM product_performance_view
+WHERE date BETWEEN '2026-05-01' AND '2026-06-22'
+  AND feed_label = 'AE'
+ORDER BY clicks DESC
+LIMIT 50
+
+-- Filter by issue severity
+SELECT id, title, item_issues
+FROM product_view
+WHERE channel = 'ONLINE'
+  AND aggregated_destination_status != 'ELIGIBLE'
+LIMIT 200
+
+-- Price competitiveness
+SELECT offer_id, title, benchmark_price, price_difference_percent
+FROM price_competitiveness_product_view
+WHERE country_of_sale = 'AE'
+ORDER BY price_difference_percent DESC
+LIMIT 100
+```
+
+Supported operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `IN (...)`, `NOT IN (...)`, `LIKE`, `IS NULL`, `IS NOT NULL`, `AND`, `OR`, `BETWEEN`
+
+**Date notes:**
+- Dates must be quoted `'YYYY-MM-DD'` strings
+- Do NOT use `TODAY`, `YESTERDAY`, or relative date keywords — they are not supported in MQL
+- Always compute dates explicitly in Python using `datetime.date.today() - timedelta(days=N)`
+- `BETWEEN` is inclusive on both ends
+- Maximum date range varies by table; `product_performance_view` supports up to 90 days
+
+#### Pagination
+
+Reports use the same cursor pattern as other sub-APIs:
+
+```python
+def query_all(merchant_id, query, headers):
+    url = f"https://merchantapi.googleapis.com/reports/v1/accounts/{merchant_id}/reports:search"
+    results = []
+    page_token = None
+    while True:
+        body = {"query": query, "pageSize": 1000}
+        if page_token:
+            body["pageToken"] = page_token
+        resp = requests.post(url, json=body, headers=headers).json()
+        results.extend(resp.get("results", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return results
+```
+
+Source: https://developers.google.com/merchant/api/reference/rest/v1/accounts.reports/search
+
+---
+
+### 10. Account Management — Sub-accounts and MCA Structure
+
+#### Multi-Client Account (MCA)
+
+An MCA (also called a "manager account" or "aggregator account") is a top-level Merchant Center account that can manage multiple sub-accounts. This mirrors the Google Ads Manager Account (MCC) structure.
+
+**Account hierarchy:**
+
+```
+MCA (manager account)
+├── Sub-account A (independent merchant)
+├── Sub-account B (independent merchant)
+└── Sub-account C (independent merchant)
+```
+
+Each sub-account is a full Merchant Center account with its own products, feeds, and shipping settings. The MCA provides a single login and API access point.
+
+#### Listing sub-accounts
+
+```http
+GET https://merchantapi.googleapis.com/accounts/v1/accounts?parent=accounts/{mcaAccountId}
+Authorization: Bearer {token}
+```
+
+Response:
+```json
+{
+  "accounts": [
+    {
+      "name": "accounts/355285634",
+      "accountId": "355285634",
+      "accountName": "Talas Auto Parts",
+      "timeZone": {"id": "Asia/Dubai"},
+      "languageCode": "en"
+    }
+  ],
+  "nextPageToken": null
+}
+```
+
+#### Creating a sub-account
+
+```http
+POST https://merchantapi.googleapis.com/accounts/v1/accounts
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "accountName": "New Sub-Account",
+  "timeZone": {"id": "Asia/Dubai"},
+  "languageCode": "en"
+}
+```
+
+The new account is automatically linked to the MCA that owns the calling credentials.
+
+#### Account labels
+
+Account labels allow grouping of sub-accounts (e.g. by business unit or region). Labels are managed via the `accounts.labels` resource (alpha as of mid-2026):
+
+```http
+GET https://merchantapi.googleapis.com/accounts/v1/accounts/{mcaAccountId}/labels
+```
+
+Labels can then be assigned to sub-accounts for filtering in reports and the UI.
+
+#### User management within an account
+
+```http
+# List users
+GET accounts/v1/accounts/{merchantId}/users
+
+# Add user (sends invitation email)
+POST accounts/v1/accounts/{merchantId}/users
+Body: {
+  "name": "accounts/{merchantId}/users/user@example.com",
+  "accessRights": ["ADMIN"]
+}
+
+# Remove user
+DELETE accounts/v1/accounts/{merchantId}/users/{email}
+```
+
+`accessRights` enum values: `ADMIN`, `PERFORMANCE_REPORTING`, `STANDARD`
+
+Source: https://developers.google.com/merchant/api/guides/accounts/overview
+
+---
+
+### 11. Error Patterns
+
+All Merchant API errors use the standard Google API error envelope:
+
+```json
+{
+  "error": {
+    "code": 400,
+    "message": "Human-readable description",
+    "status": "STATUS_STRING",
+    "details": [...]
+  }
+}
+```
+
+#### Common errors and fixes
+
+| Error code | `status` | Typical cause | Fix |
+|-----------|---------|--------------|-----|
+| 400 | `INVALID_ARGUMENT` | Missing required field, wrong enum value, malformed resource name | Check field names and enum values against schema |
+| 400 | `INVALID_ARGUMENT` | Missing `?dataSource=` query param on `productInputs` calls | Add `dataSource=accounts/{id}/dataSources/{id}` to query string |
+| 400 | `INVALID_ARGUMENT` | Missing `?updateMask=` on PATCH | Add `updateMask=field1,field2` to query string |
+| 401 | `UNAUTHENTICATED` | Token expired | Refresh token via `gads refresh` or re-run `generate_token.py` |
+| 403 | `PERMISSION_DENIED` | Wrong OAuth scope | Ensure token includes `https://www.googleapis.com/auth/content` |
+| 403 | `PERMISSION_DENIED` | `ACCESS_TOKEN_SCOPE_INSUFFICIENT` | Re-generate token to pick up new scopes |
+| 403 | `SERVICE_DISABLED` | `merchantapi.googleapis.com` not enabled on GCP project | Enable API in Cloud Console → APIs & Services |
+| 404 | `NOT_FOUND` | Wrong account ID, resource doesn't exist, or no access | Verify numeric account ID; check access in MC UI |
+| 409 | `ABORTED` | ETag conflict on `shippingSettings:insert` | Re-GET shipping settings for fresh etag, then retry |
+| 429 | `RESOURCE_EXHAUSTED` | Quota exceeded | Exponential backoff; check `quota/v1` endpoint |
+| 500 | `INTERNAL` | Google-side transient error | Retry with exponential backoff (start at 1s) |
+
+#### `MISSING_REQUIRED_FIELD` pattern
+
+```json
+{
+  "error": {
+    "code": 400,
+    "message": "Missing required field: productAttributes.title",
+    "status": "INVALID_ARGUMENT",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.BadRequest",
+        "fieldViolations": [
+          {
+            "field": "productAttributes.title",
+            "description": "Missing required field"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The `details[].fieldViolations[].field` path tells you exactly which field is missing.
+
+#### `INVALID_VALUE` pattern
+
+```json
+{
+  "error": {
+    "code": 400,
+    "message": "Invalid value for field 'productAttributes.availability': 'instock'. Must be one of: in_stock, out_of_stock, preorder, backorder",
+    "status": "INVALID_ARGUMENT"
+  }
+}
+```
+
+Common `INVALID_VALUE` triggers:
+- `availability` = `"instock"` instead of `"in_stock"`
+- `condition` = `"Used"` (capitalized) instead of `"used"`
+- `price.amountMicros` sent as integer instead of int64 string
+
+#### Retry strategy
+
+```python
+import time
+import requests
+
+def api_call_with_retry(url, method="GET", headers=None, json=None, max_retries=4):
+    delay = 1.0
+    for attempt in range(max_retries):
+        if method == "GET":
+            resp = requests.get(url, headers=headers)
+        elif method == "POST":
+            resp = requests.post(url, headers=headers, json=json)
+        else:
+            raise ValueError(f"Unsupported method: {method}")
+
+        if resp.status_code == 429 or resp.status_code >= 500:
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2  # exponential backoff
+                continue
+        return resp
+    return resp  # return last response after exhausting retries
+```
+
+---
+
+### 12. Rate Limits and Quotas
+
+The Merchant API uses the **Quota sub-API** (`quota/v1`) for programmatic quota monitoring.
+
+#### Inspect current quotas
+
+```http
+GET https://merchantapi.googleapis.com/quota/v1/accounts/{merchantId}/quotas
+Authorization: Bearer {token}
+```
+
+Response lists each method group with its limit and current usage:
+
+```json
+{
+  "quotaGroups": [
+    {
+      "name": "products.list",
+      "quotaUsage": 45,
+      "quotaLimit": 500,
+      "quotaMinuteLimit": 60,
+      "methodDetails": [
+        {
+          "method": "GET",
+          "subApi": "products",
+          "path": "accounts/{account}/products"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### General quota guidance
+
+| Operation type | Typical limit (account-dependent) | Notes |
+|---------------|----------------------------------|-------|
+| Read operations (list, get) | 500–1000 QPD per method | Higher for MCA accounts |
+| Write operations (insert, patch, delete) | 100–500 QPD per method | Lower limits; batch via file feeds for bulk |
+| Reports search | 200 QPD | Paginate large result sets |
+| Shipping settings insert | 100 QPD | Full-replace; use sparingly |
+| Trigger file fetch | 10 QPD | Manual trigger only; rely on scheduled fetch |
+
+**QPD** = Queries Per Day. The Merchant API does not publish a fixed QPS limit — it enforces daily quotas rather than per-second burst limits for most operations.
+
+#### Quota exceeded response (429)
+
+```json
+{
+  "error": {
+    "code": 429,
+    "message": "Quota exceeded for quota metric 'merchantapi.googleapis.com/default'",
+    "status": "RESOURCE_EXHAUSTED"
+  }
+}
+```
+
+Recovery: wait until the next quota window (resets at midnight Pacific time), or use exponential backoff for transient spikes.
+
+Source: https://developers.google.com/merchant/api/reference/rest (quota section)
+
+---
+
+### 13. Inventories API
+
+The Inventories sub-API (`inventories/v1`) manages per-store and per-region overrides for products that already exist in the primary feed.
+
+#### Local inventory
+
+Local inventory assigns in-store availability and pricing to a specific store code for a specific product. Used for Local Inventory Ads.
+
+**Insert local inventory:**
+
+```http
+POST https://merchantapi.googleapis.com/inventories/v1/accounts/{merchantId}/products/{encodedProductId}/localInventories:insert
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "storeCode": "QZ3",
+  "price": {
+    "amountMicros": "450000000",
+    "currencyCode": "AED"
+  },
+  "availability": "in_stock",
+  "quantity": 2,
+  "pickupMethod": "ship to store",
+  "pickupSla": "same day"
+}
+```
+
+`storeCode` must match a verified store in Google Business Profile linked to your Merchant Center account.
+
+**List local inventories for a product:**
+
+```http
+GET inventories/v1/accounts/{merchantId}/products/{encodedProductId}/localInventories?pageSize=25000
+```
+
+**Delete local inventory for one store:**
+
+```http
+DELETE inventories/v1/accounts/{merchantId}/products/{encodedProductId}/localInventories/{storeCode}
+```
+
+#### Regional inventory
+
+Regional inventory overrides price and availability for a geographic region (defined in `accounts/{id}/regions`).
+
+**Insert regional inventory:**
+
+```http
+POST https://merchantapi.googleapis.com/inventories/v1/accounts/{merchantId}/products/{encodedProductId}/regionalInventories:insert
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "region": "accounts/{merchantId}/regions/{regionId}",
+  "price": {
+    "amountMicros": "420000000",
+    "currencyCode": "AED"
+  },
+  "availability": "in_stock"
+}
+```
+
+**Delete regional inventory:**
+
+```http
+DELETE inventories/v1/accounts/{merchantId}/products/{encodedProductId}/regionalInventories/{regionId}
+```
+
+#### Update patterns
+
+- **No patch for inventories** — use insert (it is upsert behavior: inserts or fully replaces)
+- **pageSize max:** 25,000 for local inventories; 100,000 for regional inventories
+- **Product must exist** in the primary data source before inventory can be set — the `encodedProductId` must resolve to an active product
+- **Processing lag:** ~15 minutes for inventory changes to reflect in Shopping ads
+
+Source: https://developers.google.com/merchant/api/reference/rest/inventories_v1/accounts.products.localInventories
+
+---
+
+### 14. Best Practices
+
+#### Batch updates via file data sources (not API inserts)
+
+For catalogs with more than ~100 products, prefer file-based feeds over individual `productInputs:insert` calls:
+
+- File feeds (TSV/XML) process all products in a single scheduled fetch
+- API inserts count against write quotas (100-500 QPD)
+- File feeds support up to 1,000,000 products per feed
+- API data sources (`input=API`) are best for real-time single-product updates (e.g. price change on one SKU)
+
+Decision matrix:
+
+| Scenario | Preferred approach |
+|----------|-------------------|
+| Initial catalog upload (1,000+ products) | FILE data source (TSV/XML) |
+| Daily full catalog sync | FILE data source with DAILY fetch |
+| Real-time price/availability update (1-50 products) | `productInputs:patch` via API data source |
+| Removing a discontinued product | `productInputs:delete` via API data source |
+| Override price in one region | Regional inventory via `regionalInventories:insert` |
+| In-store availability | Local inventory via `localInventories:insert` |
+
+#### Incremental updates
+
+When patching products, always use `updateMask` to specify only changed fields. This:
+1. Reduces the chance of accidentally nulling required fields
+2. Makes the write idempotent and auditable
+3. Uses less quota than a full insert
+
+```python
+# Good: targeted patch
+payload = {"productAttributes": {"price": {"amountMicros": "420000000", "currencyCode": "AED"}}}
+params = {"dataSource": datasource_name, "updateMask": "productAttributes.price"}
+
+# Avoid: full insert when only price changed (overwrites all other fields)
+```
+
+#### Content language and target country combinations
+
+Each data source is tied to a specific `(contentLanguage, feedLabel)` pair. These are **immutable** after creation — you cannot change them on an existing data source.
+
+For Talas, the UAE market uses:
+
+| contentLanguage | feedLabel | Target country | Notes |
+|----------------|-----------|---------------|-------|
+| `en` | `AE` | UAE | Primary feed in English |
+
+If you need to serve in Arabic, create a **separate data source** with `contentLanguage=ar`:
+
+| contentLanguage | feedLabel | Notes |
+|----------------|-----------|-------|
+| `ar` | `AE` | Arabic-language product titles and descriptions |
+
+The two data sources with the same `feedLabel` and same `offerId` values will be merged by Google into a single product, with the correct language served based on user locale.
+
+**Common mistake:** Mixing languages within a single data source (e.g. Arabic titles in an `en` feed). Google will flag this as a language mismatch.
+
+#### Pre-mutation checklist
+
+Before any write operation on products or shipping settings:
+
+1. **Snapshot** current state: `./gads snapshot pre-{change-name} --save-file`
+2. **Verify** the data source ID is an API-type source (`input=API`)
+3. **Build** the product ID correctly using base64url encoding
+4. **Test** with a single product before bulk updates
+5. **Log** the change via `./gads log` after confirming success
+6. **Monitor** disapproval rate for 24 hours after a bulk update
+
+#### Handling missing identifier fields (identifier_exists)
+
+For products without GTINs, MPNs, or brands (uncommon for auto parts), set:
+
+```json
+{
+  "productAttributes": {
+    "identifierExists": false
+  }
+}
+```
+
+This tells Google the product genuinely has no standard identifier, avoiding a `missing_gtin` disapproval. However, for auto parts (which almost always have MPNs), you should provide the MPN even if you don't have the GTIN:
+
+```json
+{
+  "productAttributes": {
+    "mpn": "1084665-00-E",
+    "brand": "Tesla",
+    "gtins": []
+  }
+}
+```
+
+This combination (brand + mpn, no gtin) is sufficient for auto parts categories and avoids the identifier-related demotion.
+
+Source: https://support.google.com/merchants/answer/160161

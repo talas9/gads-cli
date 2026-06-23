@@ -1,3 +1,9 @@
+"""Google Business Profile API client.
+
+API: Google Business Profile (Account Management, Business Information, Legacy v4, Performance)
+KB reference: kb/gbp.md (relative to gads-cli root)
+Official docs: https://developers.google.com/my-business/reference/businessprofile/rest
+"""
 from .http import get_bearer_headers, request_json
 
 GBP_ACCOUNT_BASE = "https://mybusinessaccountmanagement.googleapis.com/v1"
@@ -5,10 +11,12 @@ GBP_INFO_BASE = "https://mybusinessbusinessinformation.googleapis.com/v1"
 GBP_V4_BASE = "https://mybusiness.googleapis.com/v4"
 
 
+# KB: kb/gbp.md § accounts | https://developers.google.com/my-business/reference/accountmanagement/rest/v1/accounts/list
 def gbp_list_accounts(creds):
     return request_json("GET", f"{GBP_ACCOUNT_BASE}/accounts", headers=get_bearer_headers(creds))
 
 
+# KB: kb/gbp.md § locations | https://developers.google.com/my-business/reference/businessinformation/rest/v1/accounts.locations/list
 def gbp_list_locations(creds, account_name, page_size=100, read_mask=None):
     params = {"pageSize": page_size}
     if read_mask:
@@ -21,6 +29,7 @@ def gbp_list_locations(creds, account_name, page_size=100, read_mask=None):
     )
 
 
+# KB: kb/gbp.md § locations | https://developers.google.com/my-business/reference/businessinformation/rest/v1/accounts.locations/get
 def gbp_get_location(creds, location_name, read_mask=None):
     params = {}
     if read_mask:
@@ -33,6 +42,7 @@ def gbp_get_location(creds, location_name, read_mask=None):
     )
 
 
+# KB: kb/gbp.md § reviews | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/list
 def gbp_list_reviews(creds, location_name, page_size=50):
     return request_json(
         "GET",
@@ -42,6 +52,7 @@ def gbp_list_reviews(creds, location_name, page_size=50):
     )
 
 
+# KB: kb/gbp.md § reviews | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/updateReply
 def gbp_reply_review(creds, review_name, comment):
     return request_json(
         "PUT",
@@ -51,6 +62,7 @@ def gbp_reply_review(creds, review_name, comment):
     )
 
 
+# KB: kb/gbp.md § reviews | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/deleteReply
 def gbp_delete_reply(creds, review_name):
     return request_json(
         "DELETE",
@@ -79,6 +91,7 @@ DAILY_METRICS = [
 ]
 
 
+# KB: kb/gbp.md § performance | https://developers.google.com/my-business/reference/businessprofileperformance/rest/v1/locations/getDailyMetricsTimeSeries
 def gbp_daily_metrics(creds, location_name, metric, start_date, end_date):
     """Fetch a single daily metric time series for a location.
 
@@ -119,6 +132,7 @@ def gbp_daily_metrics(creds, location_name, metric, start_date, end_date):
     return results
 
 
+# KB: kb/gbp.md § performance | https://developers.google.com/my-business/reference/businessprofileperformance/rest/v1/locations/fetchMultiDailyMetricsTimeSeries
 def gbp_multi_daily_metrics(creds, location_name, metrics, start_date, end_date):
     """Fetch multiple daily metrics in a single API call.
 
@@ -171,6 +185,7 @@ def gbp_multi_daily_metrics(creds, location_name, metrics, start_date, end_date)
     return result
 
 
+# KB: kb/gbp.md § performance | https://developers.google.com/my-business/reference/businessprofileperformance/rest/v1/locations.searchkeywords.impressions.monthly/list
 def gbp_search_keywords_monthly(creds, location_name, start_month, end_month, page_size=100):
     """Fetch monthly search keyword impressions.
 
@@ -210,6 +225,7 @@ def gbp_search_keywords_monthly(creds, location_name, start_month, end_month, pa
 
 # ── Reviews batch helper ─────────────────────────────────────
 
+# KB: kb/gbp.md § reviews | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/list
 def gbp_batch_get_reviews(creds, account_name, location_names, page_size=50):
     """Collect reviews for multiple locations.
 
@@ -237,6 +253,7 @@ def gbp_batch_get_reviews(creds, account_name, location_names, page_size=50):
 
 # ── Local Posts CRUD ─────────────────────────────────────────
 
+# KB: kb/gbp.md § local-posts | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts/list
 def gbp_list_local_posts(creds, account_name, location_id, page_size=20):
     """List local posts for a location.
 
@@ -253,6 +270,7 @@ def gbp_list_local_posts(creds, account_name, location_id, page_size=20):
     )
 
 
+# KB: kb/gbp.md § local-posts | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts/create
 def gbp_create_local_post(creds, account_name, location_id, post_body):
     """Create a local post for a location.
 
@@ -272,6 +290,7 @@ def gbp_create_local_post(creds, account_name, location_id, post_body):
     )
 
 
+# KB: kb/gbp.md § local-posts | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts/delete
 def gbp_delete_local_post(creds, account_name, location_id, post_id):
     """Delete a local post.
 

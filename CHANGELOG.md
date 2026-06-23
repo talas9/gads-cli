@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.0] - 2026-06-23
+
+### Added
+
+- **KB comprehensive expansion (task #14):** All five KB files (google-ads.md, merchant-api.md,
+  ga4.md, gbp.md, search-console.md) now contain a full **Developer Guide** section alongside
+  the existing endpoint reference. Total KB grew from 5,793 → 10,764 lines. Each guide covers
+  schemas, enums, request/response shapes, workflows, limits, error patterns, and best practices —
+  LLM-agent-complete: implementable against the KB alone without re-fetching docs.
+  - `google-ads.md`: +1,406 lines — campaign creation, all bidding strategies, GAQL deep dive,
+    RSA constraints, PMax asset groups, Customer Match lifecycle, error handling, pagination,
+    rate limits, API versioning policy, mutation patterns.
+  - `merchant-api.md`: +1,037 lines — product schema (required/optional fields), feed types,
+    shipping setup, product status issues, productInputs write path, Reports sub-API, MCA
+    structure, error patterns, Inventories API.
+  - `ga4.md`: +873 lines — full report request schema, dimension/metric naming (no `ga:` prefix
+    in GA4), filter expressions, key events Admin API, realtime, batchRunReports, pivot, quota
+    buckets, Admin v1alpha vs v1beta resource table.
+  - `gbp.md`: +1,099 lines — allowlist approval process, location attributes, reviews workflow,
+    `fetchMultiDailyMetricsTimeSeries` (correct method name), monthly search keywords, local
+    posts, media management, Ads integration, retry patterns.
+  - `search-console.md`: +551 lines — Search Analytics full schema, all dimension/searchType
+    combos, pagination (rowLimit=25000 + startRow loop), dimensionFilterGroups, Sites/Sitemaps
+    APIs, URL Inspection API, OAuth scope mapping.
+  - `kb/INDEX.md`: updated with KB expansion table + resolved coverage gaps.
+
+- **GSC OAuth scope fix (task #18):** Added `https://www.googleapis.com/auth/webmasters.readonly`
+  to `SCOPES` in `generate_token.py`. This was the root cause of GSC 403 errors. **User must
+  re-run `python generate_token.py` to re-consent and receive the new scope in their token.**
+
+- **GA4 Admin API v1alpha → v1beta migration (task C):** Migrated `GA4_ADMIN_BASE` in
+  `gads_lib/ga4.py` from `analyticsadmin.googleapis.com/v1alpha` to
+  `analyticsadmin.googleapis.com/v1beta`. Key events (`list`, `create`, `delete`) exist
+  identically in both versions; v1beta carries the "no breaking changes" stability guarantee.
+  `gads kb check` now exits 0 with all APIs aligned.
+
+- **Code ↔ KB cross-references (task #15):** Added module-level docstrings citing KB file +
+  official doc URL, plus per-function `# KB: kb/<slug>.md § <section>` comments, to all five
+  service modules: `ads.py` (11 refs), `ga4.py` (9 refs), `gbp.py` (13 refs), `gsc.py`
+  (4 refs), `merchant.py` (7 refs). Total: 44 cross-reference annotations.
+
+- **Test suite (task #16):** Added `tests/test_gads.py` (58 tests, 100% pass, offline/CI-safe).
+  Covers: request construction correctness (GA4 body shape, v1beta URL, GSC startRow, Merchant
+  products URL, GBP perf URL), `--json` output structure, SELECT-only guard, error envelope +
+  exit codes, `gads kb check` alignment, manifest validity, version sentinel.
+
+- **Graceful access-error handling:** `gads_lib/output.py` gains `classify_api_error()` and
+  `offer_gcloud_enable()`; `gads_lib/http.py` now dispatches classified errors instead of
+  printing raw API responses. Four error classes handled:
+  1. **API_NOT_ENABLED** (403 SERVICE_DISABLED) — names the service, offers to run
+     `gcloud services enable <service>.googleapis.com --project <id>` interactively
+     (requires confirmation; falls back to console link if gcloud is absent/declined).
+  2. **MERCHANT_NOT_REGISTERED** (401 GCP_NOT_REGISTERED) — shows registration link;
+     gcloud cannot fix this.
+  3. **INSUFFICIENT_SCOPE** (403 INSUFFICIENT_AUTHENTICATION_SCOPES) — names the
+     exact missing scope per API and instructs `python generate_token.py`.
+  4. **PERMISSION_DENIED / allowlist** (403 PERMISSION_DENIED or 429 zero-quota) —
+     advises requesting allowlist access with the relevant GBP or IAM console link.
+  All paths exit with code 5 (`EXIT_CODES["API"]`) and never print a traceback. All 4
+  mappings covered by 7 new tests in `TestGracefulErrorHandling`.
+
+### Fixed
+
+- **GA4 `kb check` drift:** `gads kb check` previously flagged `[DRIFT] ga4 manifest=v1beta
+  code=v1alpha`. Resolved by migrating the code to v1beta. `kb check` now exits 0 cleanly.
+
 ## [3.7.0] - 2026-06-23
 
 ### Added

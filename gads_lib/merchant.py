@@ -1,3 +1,9 @@
+"""Google Merchant Center API client (Merchant API v1).
+
+API: Merchant API v1 (accounts, products, datasources sub-APIs)
+KB reference: kb/merchant-api.md (relative to gads-cli root)
+Official docs: https://developers.google.com/merchant/api
+"""
 from .config import MERCHANT_CENTER_ID
 from .http import get_bearer_headers, request_json
 
@@ -8,6 +14,7 @@ MA_PRODUCTS = "https://merchantapi.googleapis.com/products/v1"
 MA_DATASOURCES = "https://merchantapi.googleapis.com/datasources/v1"
 
 
+# KB: kb/merchant-api.md § accounts | https://developers.google.com/merchant/api/reference/rest/accounts_v1beta/accounts/get
 def mc_get_account(creds):
     """Fetch the Merchant Center account.
 
@@ -27,6 +34,7 @@ def mc_get_account(creds):
     )
 
 
+# KB: kb/merchant-api.md § account-issues | https://developers.google.com/merchant/api/reference/rest/accounts_v1beta/accounts.issues/list
 def mc_get_account_status(creds):
     """List account-level issues for the Merchant Center account.
 
@@ -51,6 +59,7 @@ def mc_get_account_status(creds):
     )
 
 
+# KB: kb/merchant-api.md § products | https://developers.google.com/merchant/api/reference/rest/products_v1beta/accounts.products/list
 def mc_list_products(creds, max_results=50, page_token=None):
     """List products in the Merchant Center account.
 
@@ -84,6 +93,7 @@ def mc_list_products(creds, max_results=50, page_token=None):
     )
 
 
+# KB: kb/merchant-api.md § products | https://developers.google.com/merchant/api/reference/rest/products_v1beta/accounts.products/list
 def mc_list_product_statuses(creds, max_results=50, page_token=None):
     """List product statuses for the Merchant Center account.
 
@@ -107,6 +117,7 @@ def mc_list_product_statuses(creds, max_results=50, page_token=None):
     )
 
 
+# KB: kb/merchant-api.md § datasources | https://developers.google.com/merchant/api/reference/rest/datasources_v1beta/accounts.dataSources/list
 def mc_list_datafeeds(creds):
     """List data sources (formerly datafeeds) in the Merchant Center account.
 
@@ -127,6 +138,7 @@ def mc_list_datafeeds(creds):
     )
 
 
+# KB: kb/merchant-api.md § shipping | https://developers.google.com/merchant/api/reference/rest/accounts_v1beta/accounts.shippingSettings/get
 def mc_get_shipping(creds):
     """Fetch shipping settings for the Merchant Center account.
 
@@ -146,6 +158,7 @@ def mc_get_shipping(creds):
     )
 
 
+# KB: kb/merchant-api.md § return-policies | https://developers.google.com/merchant/api/reference/rest/accounts_v1beta/accounts.onlineReturnPolicies/list
 def mc_get_return_policy(creds):
     """List online return policies for the Merchant Center account.
 

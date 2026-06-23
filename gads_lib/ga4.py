@@ -1,3 +1,9 @@
+"""Google Analytics 4 Data and Admin API client.
+
+API: GA4 Data API (v1beta) + GA4 Admin API (v1beta)
+KB reference: kb/ga4.md (relative to gads-cli root)
+Official docs: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
+"""
 import click
 import requests
 
@@ -5,7 +11,7 @@ from .config import GA4_PROPERTY_ID
 from .http import get_bearer_headers, request_json
 
 GA4_DATA_BASE = "https://analyticsdata.googleapis.com/v1beta"
-GA4_ADMIN_BASE = "https://analyticsadmin.googleapis.com/v1alpha"
+GA4_ADMIN_BASE = "https://analyticsadmin.googleapis.com/v1beta"
 
 VALID_COUNTING_METHODS = ("ONCE_PER_EVENT", "ONCE_PER_SESSION")
 
@@ -18,6 +24,7 @@ def _require_property():
     return GA4_PROPERTY_ID
 
 
+# KB: kb/ga4.md § metadata | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/getMetadata
 def ga4_get_metadata(creds, property_id=None):
     pid = property_id or _require_property()
     return request_json(
@@ -27,6 +34,7 @@ def ga4_get_metadata(creds, property_id=None):
     )
 
 
+# KB: kb/ga4.md § run-report | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport
 def ga4_run_report(creds, dimensions, metrics, date_ranges, property_id=None, limit=10000):
     pid = property_id or _require_property()
     body = {
@@ -43,6 +51,7 @@ def ga4_run_report(creds, dimensions, metrics, date_ranges, property_id=None, li
     )
 
 
+# KB: kb/ga4.md § realtime-report | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runRealtimeReport
 def ga4_run_realtime_report(creds, dimensions, metrics, property_id=None):
     pid = property_id or _require_property()
     body = {
@@ -102,6 +111,7 @@ def _raise_for_admin_status(resp, action):
         )
 
 
+# KB: kb/ga4.md § key-events | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/list
 def list_key_events(property_id, creds):
     """Return all keyEvents on a GA4 property.
 
@@ -126,6 +136,7 @@ def list_key_events(property_id, creds):
     return items
 
 
+# KB: kb/ga4.md § key-events | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/create
 def create_key_event(property_id, creds, event_name, counting_method="ONCE_PER_SESSION"):
     """Create (mark) an event as a key event. Idempotent.
 
@@ -155,6 +166,7 @@ def create_key_event(property_id, creds, event_name, counting_method="ONCE_PER_S
     return data
 
 
+# KB: kb/ga4.md § key-events | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/delete
 def delete_key_event(property_id, creds, event_name):
     """Delete a keyEvent by event name. Returns True if deleted, False if not found."""
     pid = _normalise_property(property_id)
@@ -188,6 +200,7 @@ def delete_key_event(property_id, creds, event_name):
 # API: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
 
 
+# KB: kb/ga4.md § batch-run-reports | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/batchRunReports
 def ga4_batch_run_reports(creds, requests_list, property_id=None):
     """Run multiple GA4 reports in a single API call.
 
@@ -215,6 +228,7 @@ def ga4_batch_run_reports(creds, requests_list, property_id=None):
     )
 
 
+# KB: kb/ga4.md § pivot-report | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runPivotReport
 def ga4_run_pivot_report(creds, dimensions, metrics, date_ranges, pivots, property_id=None):
     """Run a GA4 pivot report.
 
@@ -251,6 +265,7 @@ def ga4_run_pivot_report(creds, dimensions, metrics, date_ranges, pivots, proper
     )
 
 
+# KB: kb/ga4.md § check-compatibility | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/checkCompatibility
 def ga4_check_compatibility(creds, dimensions, metrics, property_id=None):
     """Check which dimensions and metrics are compatible with each other.
 

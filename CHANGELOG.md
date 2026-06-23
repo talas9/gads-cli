@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.0] - 2026-06-23
+
+### Added
+- **`analyze` command group** (5 new read-only analysis commands; no account mutations):
+  - `analyze landing-page` — fetches a branch landing page over HTTP and scores it
+    (0-100) on message-match, trust signals, mobile/viewport, load weight,
+    WhatsApp/branch CTA, and `?branch=` survival; lists concrete issues. Branch
+    choices: qz3 / sja / ind4.
+  - `analyze wasted-spend` — AED-ranked wasted spend on zero-conversion and
+    below-average-CPA search terms and campaigns (window ends yesterday).
+  - `analyze ngrams` — 1/2/3-gram clustering of search terms (Arabic + English),
+    aggregating cost & conversions per n-gram and surfacing high-cost zero/low-conv
+    negative-keyword candidates.
+  - `analyze ad-copy` — performance-ranked RSA ads validated against PARTS-ONLY
+    business rules (no install/repair/workshop/battery-service; "Tesla" not "EV";
+    not OEM/Genuine-only; branch phone). Rules sourced from the `business_rules`
+    DB table plus encoded detectors; flags violations by severity.
+  - `analyze competition` — competitive pressure from impression-share metrics
+    (impression share, top/abs-top IS, rank-lost IS) per keyword, plus a
+    best-effort auction-insights attempt that degrades gracefully when the REST
+    API does not expose auction-insight fields.
+- New `gads_lib/analyze/` sub-package: `lp_score.py`, `wasted_spend.py`,
+  `ngrams.py`, `adcopy.py`, `competitive.py`.
+
+### Changed
+- Total command groups: 15 → 16 (added `analyze`).
+
 ## [3.3.0] - 2026-03-31
 
 ### Added

@@ -2809,6 +2809,77 @@ def accounts_cmd(as_json):
     print_table(rows, ["id", "name", "status", "manager"])
 
 
+# ── analyze: read-only analysis commands ────────────────────
+@cli.group()
+def analyze():
+    """Read-only analysis: landing pages, wasted spend, n-grams, ad copy, competition."""
+    pass
+
+
+@analyze.command("landing-page")
+@click.option("--branch", "-b", type=click.Choice(["qz3", "sja", "ind4"]), default="qz3",
+              help="Branch landing page to score.")
+@click.option("--url", "-u", default=None, help="Override URL (otherwise branch default).")
+@click.option("--timeout", type=int, default=20, help="HTTP timeout (seconds).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_landing_page(branch, url, timeout, as_json):
+    """Score a branch landing page for conversion readiness (read-only HTTP fetch)."""
+    from gads_lib.analyze.lp_score import score_landing_page, render_lp_score
+    result = score_landing_page(branch, url=url, timeout=timeout)
+    render_lp_score(result, as_json=as_json)
+
+
+@analyze.command("wasted-spend")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--min-cost", type=float, default=1.0, help="Ignore items below this AED cost.")
+@click.option("--cpa-multiple", type=float, default=2.0,
+              help="Flag below-average items whose CPA exceeds N x account avg CPA.")
+@click.option("--limit", "-l", type=int, default=25, help="Rows per table.")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_wasted_spend_cmd(days, min_cost, cpa_multiple, limit, as_json):
+    """AED-ranked wasted spend on zero/low-conversion search terms and campaigns."""
+    from gads_lib.analyze.wasted_spend import analyze_wasted_spend, render_wasted_spend
+    result = analyze_wasted_spend(get_credentials(), days=days, min_cost=min_cost,
+                                  cpa_multiple=cpa_multiple)
+    render_wasted_spend(result, as_json=as_json, limit=limit)
+
+
+@analyze.command("ngrams")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("-n", "n", type=int, default=3, help="Max n-gram size (produces 1..n).")
+@click.option("--min-cost", type=float, default=1.0, help="Ignore n-grams below this AED cost.")
+@click.option("--top", "-t", type=int, default=25, help="Rows per table.")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_ngrams_cmd(days, n, min_cost, top, as_json):
+    """N-gram clustering of search terms (Arabic + English) with negative candidates."""
+    from gads_lib.analyze.ngrams import analyze_ngrams, render_ngrams
+    result = analyze_ngrams(get_credentials(), days=days, n=n, min_cost=min_cost, top=top)
+    render_ngrams(result, as_json=as_json, top=top)
+
+
+@analyze.command("ad-copy")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--top", "-t", type=int, default=25, help="Rows in the ranked table.")
+@click.option("--violations-only", is_flag=True, help="Only show ads with rule violations.")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_ad_copy_cmd(days, top, violations_only, as_json):
+    """Performance-ranked RSA ads, validated against PARTS-ONLY business rules."""
+    from gads_lib.analyze.adcopy import analyze_adcopy, render_adcopy
+    result = analyze_adcopy(get_credentials(), days=days, top=max(top, 50))
+    render_adcopy(result, as_json=as_json, top=top, violations_only=violations_only)
+
+
+@analyze.command("competition")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--top", "-t", type=int, default=25, help="Rows in the pressure table.")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_competition_cmd(days, top, as_json):
+    """Competitive pressure via impression-share + auction-insights (best-effort)."""
+    from gads_lib.analyze.competitive import analyze_competitive, render_competitive
+    result = analyze_competitive(get_credentials(), days=days, top=max(top, 50))
+    render_competitive(result, as_json=as_json, top=top)
+
+
 # ── Register grouped aliases ────────────────────────────────
 ads.add_command(query, name="query")
 ads.add_command(perf, name="perf")

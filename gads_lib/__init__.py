@@ -1,6 +1,6 @@
 """Internal library for the gads CLI."""
 
-__version__ = "3.4.0"
+__version__ = "3.5.0"
 
 from .config import (
     PROJECT_ROOT,
@@ -66,5 +66,5 @@ from .ga4 import (
     delete_key_event,
     VALID_COUNTING_METHODS,
 )
-from .output import flatten, print_json, print_table
+from .output import flatten, print_json, print_table, print_error, EXIT_CODES
 from .timeutil import now_local, today_local

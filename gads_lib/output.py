@@ -2,6 +2,30 @@ import json
 
 import click
 
+EXIT_CODES = {
+    "OK": 0,
+    "GENERAL": 1,
+    "USAGE": 2,
+    "AUTH": 3,
+    "NOT_FOUND": 4,
+    "API": 5,
+    "VALIDATION": 6,
+    "DB": 7,
+}
+
+
+def print_error(message, code="GENERAL", exit_code=None, as_json=False):
+    """Print a structured error and return the numeric exit code."""
+    numeric = exit_code if exit_code is not None else EXIT_CODES.get(code, 1)
+    if as_json:
+        click.echo(
+            json.dumps({"error": {"code": code, "message": message, "exit_code": numeric}}),
+            err=True,
+        )
+    else:
+        click.secho(f"✗ {message}", fg="red", err=True)
+    return numeric
+
 
 def flatten(obj, prefix=""):
     """Flatten nested dict for table display."""

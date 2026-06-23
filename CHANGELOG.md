@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.5.0] - 2026-06-23
+
+### Added
+- **`catalog` command** — emits a complete machine-readable manifest of every
+  command, subcommand, param, type, default, and help string by walking the live
+  Click command tree (`gads catalog --json`). Lets an agent discover the CLI's
+  full capabilities without parsing `--help`. Human-readable fallback without
+  `--json`. New module `gads_lib/catalog.py`.
+- **Structured error envelope + stable exit codes** — `main()` now wraps the CLI
+  so failures emit `{"error":{"code":...,"message":...,"exit_code":N}}` to stderr
+  when `--json` is in effect (colored text otherwise). Stable codes: 0 OK,
+  1 GENERAL, 2 USAGE, 3 AUTH, 4 NOT_FOUND, 5 API, 6 VALIDATION, 7 DB. New
+  `print_error()` helper and `EXIT_CODES` in `gads_lib/output.py`.
+- **Read-only history-DB access**:
+  - `gads db "<SQL>" [--json] [--limit N]` — SELECT-only passthrough to the local
+    SQLite history DB. Rejects any mutating/multi-statement SQL (exit code 6) and
+    enforces `PRAGMA query_only` as defense in depth.
+  - `gads changelog` / `gads decisions` / `gads milestones` `[--json] [-n LIMIT]` —
+    native readers for the project's own memory tables.
+  - New module `gads_lib/dbread.py` with `assert_select_only`, `run_select`, and
+    the convenience readers.
+- **`--json` added to `log`, `snapshot`, `refresh`** — these three top-level
+  commands now emit structured JSON like every other command.
+- **Global `--plain` and `--quiet`/`-q` flags** — `--plain` produces
+  deterministic, no-color/no-emoji output for parsing; `--quiet` suppresses
+  non-essential progress output.
+- **`AGENTS.md` and `llms.txt`** at the CLI root — capability index documenting
+  how an agent should drive the CLI (catalog-first discovery, output contract,
+  exit codes, reading project memory, mutation discipline).
+
+### Changed
+- `cli` root group now carries global `--plain`/`--quiet` options and a context
+  object; `main()` runs Click with `standalone_mode=False` to own error handling.
+
 ## [3.4.0] - 2026-06-23
 
 ### Added

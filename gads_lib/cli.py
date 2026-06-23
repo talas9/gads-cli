@@ -73,13 +73,26 @@ from gads_lib import (
 
 from gads_lib import __version__
 from gads_lib.gsc import gsc_list_sites, gsc_search_analytics
+from gads_lib.output import EXIT_CODES, print_error
+from gads_lib.catalog import build_catalog
+from gads_lib import dbread
 
 
-@click.group()
+@click.group(context_settings={"auto_envvar_prefix": "GADS"})
 @click.version_option(__version__, prog_name="gads")
-def cli():
+@click.option("--plain", is_flag=True, help="Deterministic output: no color, no emoji (for parsing).")
+@click.option("--quiet", "-q", is_flag=True, help="Suppress non-essential progress/info output.")
+@click.pass_context
+def cli(ctx, plain, quiet):
     """gads — Unified Google platform CLI."""
-    pass
+    ctx.ensure_object(dict)
+    ctx.obj["plain"] = plain
+    ctx.obj["quiet"] = quiet
+    if plain:
+        # Strip ANSI color globally for deterministic, parseable output.
+        import os as _os
+        _os.environ["NO_COLOR"] = "1"
+        ctx.color = False
 
 
 @cli.group()
@@ -712,7 +725,8 @@ def query(gaql, limit, as_json):
 @click.option("--agent", default="claude-code")
 @click.option("--snapshot-ref", default="")
 @click.option("--script", default="")
-def log(action, details, reason, campaign, campaign_id, agent, snapshot_ref, script):
+@click.option("--json", "as_json", is_flag=True)
+def log(action, details, reason, campaign, campaign_id, agent, snapshot_ref, script, as_json):
     """Log an action to the changelog (append-only)."""
     import json as _json
     ts = now_local()
@@ -728,7 +742,10 @@ def log(action, details, reason, campaign, campaign_id, agent, snapshot_ref, scr
             (ts, action, campaign, campaign_id, details, reason, agent, snapshot_ref, script, _json.dumps(raw)),
         )
         conn.commit()
-        click.secho(f"✓ Logged: {action} at {ts}", fg="green")
+        if as_json:
+            print_json({"logged": True, "timestamp": ts, "action": action, "details": details})
+        else:
+            click.secho(f"✓ Logged: {action} at {ts}", fg="green")
     finally:
         conn.close()
 
@@ -736,7 +753,8 @@ def log(action, details, reason, campaign, campaign_id, agent, snapshot_ref, scr
 @cli.command()
 @click.argument("name")
 @click.option("--save-file", is_flag=True, help="Also save JSON to snapshots/ directory.")
-def snapshot(name, save_file):
+@click.option("--json", "as_json", is_flag=True)
+def snapshot(name, save_file, as_json):
     """Snapshot current campaign configs from the API."""
     import json as _json
     creds = get_credentials()
@@ -747,7 +765,8 @@ def snapshot(name, save_file):
            campaign.target_cpa.target_cpa_micros, campaign.target_roas.target_roas
     FROM campaign WHERE campaign.status != 'REMOVED' ORDER BY campaign.name
     """
-    click.echo("Fetching campaign configs from API...")
+    if not as_json:
+        click.echo("Fetching campaign configs from API...")
     results = run_gaql(creds, gaql)
     configs = []
     for r in results:
@@ -762,7 +781,8 @@ def snapshot(name, save_file):
             "target_roas": float(camp.get("targetRoas", {}).get("targetRoas", 0)),
         })
 
-    click.echo(f"  Got {len(configs)} campaigns")
+    if not as_json:
+        click.echo(f"  Got {len(configs)} campaigns")
     conn = get_db()
     today = today_local()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -782,14 +802,22 @@ def snapshot(name, save_file):
                  (filename, today, datetime.now().strftime("%H:%M:%S"), name, ""))
     conn.commit()
     conn.close()
-    click.secho(f"✓ Saved {len(configs)} configs (date={today})", fg="green")
 
+    written_path = None
     if save_file:
         SNAPSHOTS_DIR.mkdir(exist_ok=True)
         filepath = SNAPSHOTS_DIR / filename
         with open(filepath, "w") as f:
             _json.dump({"name": name, "date": today, "campaigns": configs}, f, indent=2)
-        click.secho(f"✓ Written: {filepath}", fg="green")
+        written_path = str(filepath)
+
+    if as_json:
+        print_json({"saved": True, "name": name, "date": today, "count": len(configs),
+                    "db_record": filename, "file": written_path, "campaigns": configs})
+        return
+    click.secho(f"✓ Saved {len(configs)} configs (date={today})", fg="green")
+    if written_path:
+        click.secho(f"✓ Written: {written_path}", fg="green")
 
 
 @cli.command()
@@ -894,11 +922,13 @@ def config(as_json, from_db):
 @click.option("--days", "-d", type=int, default=3)
 @click.option("--config", "with_config", is_flag=True)
 @click.option("--push", is_flag=True)
-def refresh(days, with_config, push):
+@click.option("--json", "as_json", is_flag=True)
+def refresh(days, with_config, push, as_json):
     """Pull fresh data from the API into the local database."""
     date_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     date_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    click.echo(f"Fetching: {date_from} → {date_to}")
+    if not as_json:
+        click.echo(f"Fetching: {date_from} → {date_to}")
     creds = get_credentials()
 
     q = f"""
@@ -931,7 +961,9 @@ def refresh(days, with_config, push):
              all_conversions, interactions)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
     conn.commit()
-    click.secho(f"  ✓ {len(rows)} rows updated", fg="green")
+    if not as_json:
+        click.secho(f"  ✓ {len(rows)} rows updated", fg="green")
+    config_updated = False
 
     if with_config:
         cfg_q = """
@@ -956,16 +988,25 @@ def refresh(days, with_config, push):
                  int(camp.get("targetCpa", {}).get("targetCpaMicros", 0)) / 1_000_000,
                  float(camp.get("targetRoas", {}).get("targetRoas", 0))))
         conn.commit()
-        click.secho("  ✓ Campaign configs updated", fg="green")
+        config_updated = True
+        if not as_json:
+            click.secho("  ✓ Campaign configs updated", fg="green")
     conn.close()
 
+    pushed = False
     if push:
         os.chdir(str(PROJECT_ROOT))
         subprocess.run(["git", "add", str(DB_PATH)], check=True)
         subprocess.run(["git", "commit", "-m", f"data: refresh {date_from} to {date_to}"], check=False)
         subprocess.run(["git", "pull", "--rebase"], check=False)
         subprocess.run(["git", "push"], check=False)
-        click.secho("  ✓ Git sync done", fg="green")
+        pushed = True
+        if not as_json:
+            click.secho("  ✓ Git sync done", fg="green")
+
+    if as_json:
+        print_json({"refreshed": True, "date_from": date_from, "date_to": date_to,
+                    "rows_updated": len(rows), "config_updated": config_updated, "pushed": pushed})
 
 
 # ── GBP commands ─────────────────────────────────────────────
@@ -2880,6 +2921,96 @@ def analyze_competition_cmd(days, top, as_json):
     render_competitive(result, as_json=as_json, top=top)
 
 
+# ── Catalog (machine-readable command manifest) ─────────────
+
+@cli.command()
+@click.option("--json", "as_json", is_flag=True, help="Emit the full command manifest as JSON.")
+def catalog(as_json):
+    """Emit a machine-readable manifest of every command, param, and help string.
+
+    Lets an agent discover the CLI's full capabilities without parsing --help.
+    """
+    manifest = build_catalog(cli, __version__)
+    if as_json:
+        print_json(manifest)
+        return
+    # Human-readable fallback: list commands + one-line help.
+    click.secho("\n  gads command catalog\n", fg="white", bold=True)
+
+    def _emit(commands, indent=2):
+        for name in sorted(commands):
+            entry = commands[name]
+            help_txt = (entry.get("help") or "").strip().splitlines()
+            help_one = help_txt[0] if help_txt else ""
+            click.echo(f"{' ' * indent}{name:<18} {help_one}")
+            if entry.get("subcommands"):
+                _emit(entry["subcommands"], indent + 4)
+
+    _emit(manifest["commands"])
+    click.echo(f"\n  Use 'gads catalog --json' for the full machine-readable manifest.\n")
+
+
+# ── Read-only history DB access ─────────────────────────────
+
+@cli.command(name="db")
+@click.argument("sql")
+@click.option("--limit", type=int, default=None, help="Cap the number of returned rows.")
+@click.option("--json", "as_json", is_flag=True)
+def db_query(sql, limit, as_json):
+    """Run a read-only SELECT against the local history database.
+
+    Only single SELECT/WITH queries are allowed; any mutating statement is rejected.
+    """
+    try:
+        rows = dbread.run_select(sql, limit=limit)
+    except dbread.UnsafeSQLError as e:
+        raise SystemExit(print_error(str(e), code="VALIDATION", as_json=as_json))
+    if as_json:
+        print_json(rows)
+        return
+    print_table([flatten(r) for r in rows] if rows else rows)
+    click.echo(f"\n  {len(rows)} row(s)")
+
+
+@cli.command()
+@click.option("--limit", "-n", type=int, default=50)
+@click.option("--json", "as_json", is_flag=True)
+def changelog(limit, as_json):
+    """Read the local changelog (append-only action history)."""
+    rows = dbread.read_changelog(limit=limit)
+    if as_json:
+        print_json(rows)
+        return
+    print_table([flatten(r) for r in rows] if rows else rows)
+    click.echo(f"\n  {len(rows)} entry(ies)")
+
+
+@cli.command()
+@click.option("--limit", "-n", type=int, default=50)
+@click.option("--json", "as_json", is_flag=True)
+def decisions(limit, as_json):
+    """Read the local decisions log."""
+    rows = dbread.read_decisions(limit=limit)
+    if as_json:
+        print_json(rows)
+        return
+    print_table([flatten(r) for r in rows] if rows else rows)
+    click.echo(f"\n  {len(rows)} decision(s)")
+
+
+@cli.command()
+@click.option("--limit", "-n", type=int, default=50)
+@click.option("--json", "as_json", is_flag=True)
+def milestones(limit, as_json):
+    """Read the local milestones log."""
+    rows = dbread.read_milestones(limit=limit)
+    if as_json:
+        print_json(rows)
+        return
+    print_table([flatten(r) for r in rows] if rows else rows)
+    click.echo(f"\n  {len(rows)} milestone(s)")
+
+
 # ── Register grouped aliases ────────────────────────────────
 ads.add_command(query, name="query")
 ads.add_command(perf, name="perf")
@@ -2890,4 +3021,34 @@ ads.add_command(log, name="log")
 
 
 def main():
-    cli()
+    """Entry point with a structured error envelope and stable exit codes.
+
+    On failure, emits {"error": {...}} JSON to stderr when --json was requested,
+    otherwise a colored message. Honors meaningful exit codes from EXIT_CODES.
+    """
+    # Detect whether the invocation asked for JSON output (best-effort, for the
+    # top-level catch only — individual commands handle their own --json output).
+    want_json = "--json" in sys.argv
+    try:
+        cli(standalone_mode=False)
+    except SystemExit as e:
+        # Honor explicit exit codes raised by commands (already printed).
+        raise
+    except click.exceptions.Abort:
+        raise SystemExit(EXIT_CODES["GENERAL"])
+    except click.exceptions.UsageError as e:
+        # Preserve Click's own formatting on stderr, then exit with USAGE code.
+        e.show()
+        raise SystemExit(EXIT_CODES["USAGE"])
+    except click.ClickException as e:
+        raise SystemExit(print_error(e.format_message(), code="GENERAL", as_json=want_json))
+    except Exception as e:  # noqa: BLE001 — top-level safety net
+        code = "GENERAL"
+        msg = str(e).lower()
+        if "auth" in msg or "credential" in msg or "token" in msg or "401" in msg:
+            code = "AUTH"
+        elif "not found" in msg or "404" in msg:
+            code = "NOT_FOUND"
+        elif "403" in msg or "api" in msg or "quota" in msg:
+            code = "API"
+        raise SystemExit(print_error(f"{type(e).__name__}: {e}", code=code, as_json=want_json))

@@ -45,7 +45,7 @@ Each KB file now contains both an **endpoint reference** section and a comprehen
 - **Merchant API:** dataSource fileUploads status.
 - **GA4:** `runFunnelReport`, Admin `keyEvents.patch`.
 - **GBP:** Google-suggested location updates. **Resolved:** `fetchMultiDailyMetricsTimeSeries` correct method name now documented in gbp.md Developer Guide.
-- **Search Console:** All gaps (`startRow` pagination, `dataState`, `dimensionFilterGroups`, URL Inspection, sitemaps) now covered in search-console.md Developer Guide.
+- **Search Console:** Remaining gaps (`startRow` pagination, `dataState`, `dimensionFilterGroups`) documented in search-console.md Developer Guide. URL Inspection (`gsc_url_inspect`) and sitemaps (`gsc_list_sitemaps`) are now implemented in `gads_lib/gsc.py`.
 
 ## Notes on verification
 

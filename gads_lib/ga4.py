@@ -4,11 +4,15 @@ API: GA4 Data API (v1beta) + GA4 Admin API (v1beta)
 KB reference: kb/ga4.md (relative to gads-cli root)
 Official docs: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
 """
+import json
+import sys
+
 import click
 import requests
 
 from .config import GA4_PROPERTY_ID
 from .http import get_bearer_headers, request_json
+from .output import EXIT_CODES, classify_api_error
 
 GA4_DATA_BASE = "https://analyticsdata.googleapis.com/v1beta"
 GA4_ADMIN_BASE = "https://analyticsadmin.googleapis.com/v1beta"
@@ -91,31 +95,71 @@ def _normalise_property(property_id):
 
 
 def _raise_for_admin_status(resp, action):
-    """Translate GA4 Admin API failures into actionable errors.
+    """Translate GA4 Admin API failures into actionable human-readable errors.
+
+    Emits a message to stderr then raises SystemExit with EXIT_CODES["API"] (5).
 
     403 → scope likely missing, point user to generate_token.py.
     404 → property id wrong.
+
+    This helper is used in human (non-JSON) mode only. Under --json, callers
+    should use _raise_for_admin_status_json() instead.
     """
     if resp.status_code == 403:
-        raise SystemExit(
-            f"403 Forbidden while {action}. The OAuth token almost certainly "
+        click.secho(
+            f"✗ 403 Forbidden while {action}. The OAuth token almost certainly "
             "lacks the analytics.edit scope — re-run tools/generate_token.py "
-            "(or gads-cli/generate_token.py) to refresh it, then retry."
+            "(or gads-cli/generate_token.py) to refresh it, then retry.",
+            fg="red",
+            err=True,
         )
+        raise SystemExit(EXIT_CODES["API"])
     if resp.status_code == 404:
-        raise SystemExit(
-            f"404 Not Found while {action}. Check GOOGLE_GA4_PROPERTY_ID — "
-            "it must be the numeric GA4 property id (not a Measurement ID)."
+        click.secho(
+            f"✗ 404 Not Found while {action}. Check GOOGLE_GA4_PROPERTY_ID — "
+            "it must be the numeric GA4 property id (not a Measurement ID).",
+            fg="red",
+            err=True,
         )
+        raise SystemExit(EXIT_CODES["API"])
     if resp.status_code >= 400:
-        raise SystemExit(
-            f"GA4 Admin API error while {action} ({resp.status_code}): "
-            f"{resp.text[:600]}"
+        click.secho(
+            f"✗ GA4 Admin API error while {action} ({resp.status_code}): "
+            f"{resp.text[:600]}",
+            fg="red",
+            err=True,
         )
+        raise SystemExit(EXIT_CODES["API"])
+
+
+def _handle_admin_error(resp, action, url, as_json=False):
+    """Handle a GA4 Admin API error response, respecting --json mode.
+
+    Under --json: emit a JSON envelope to stdout, exit EXIT_CODES["API"] (5).
+    Under human mode: emit GA4-specific helpful message to stderr, exit EXIT_CODES["API"] (5).
+
+    Only call this when resp.status_code >= 400.
+    """
+    if as_json:
+        classified = classify_api_error(resp.status_code, resp.text, url=url)
+        envelope = classified if classified is not None else {
+            "code": "API_ERROR",
+            "message": resp.text[:600],
+            "action": None,
+            "service": None,
+            "scope": None,
+            "url": None,
+            "project_id": None,
+        }
+        sys.stdout.write(json.dumps({"error": envelope}) + "\n")
+        sys.stdout.flush()
+        raise SystemExit(EXIT_CODES["API"])
+    else:
+        _raise_for_admin_status(resp, action)
 
 
 # KB: kb/ga4.md § key-events | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/list
-def list_key_events(property_id, creds):
+def list_key_events(property_id, creds, as_json=False):
     """Return all keyEvents on a GA4 property.
 
     Each item has keys: eventName, countingMethod, name (full resource path),
@@ -130,7 +174,8 @@ def list_key_events(property_id, creds):
         if page_token:
             params["pageToken"] = page_token
         resp = requests.get(url, headers=get_bearer_headers(creds), params=params, timeout=30)
-        _raise_for_admin_status(resp, "listing keyEvents")
+        if resp.status_code >= 400:
+            _handle_admin_error(resp, "listing keyEvents", url, as_json=as_json)
         data = resp.json() if resp.text else {}
         items.extend(data.get("keyEvents", []))
         page_token = data.get("nextPageToken")
@@ -140,7 +185,7 @@ def list_key_events(property_id, creds):
 
 
 # KB: kb/ga4.md § key-events | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/create
-def create_key_event(property_id, creds, event_name, counting_method="ONCE_PER_SESSION"):
+def create_key_event(property_id, creds, event_name, counting_method="ONCE_PER_SESSION", as_json=False):
     """Create (mark) an event as a key event. Idempotent.
 
     Returns the API response dict on success. If the event is already a key
@@ -157,24 +202,25 @@ def create_key_event(property_id, creds, event_name, counting_method="ONCE_PER_S
     resp = requests.post(url, headers=get_bearer_headers(creds), json=body, timeout=30)
     if resp.status_code == 409:
         # Already exists — look it up from the list so we still return a dict.
-        for existing in list_key_events(pid, creds):
+        for existing in list_key_events(pid, creds, as_json=False):
             if existing.get("eventName") == event_name:
                 existing = dict(existing)
                 existing["_already_exists"] = True
                 return existing
         return {"eventName": event_name, "countingMethod": counting_method, "_already_exists": True}
-    _raise_for_admin_status(resp, f"creating keyEvent {event_name!r}")
+    if resp.status_code >= 400:
+        _handle_admin_error(resp, f"creating keyEvent {event_name!r}", url, as_json=as_json)
     data = resp.json() if resp.text else {}
     data["_already_exists"] = False
     return data
 
 
 # KB: kb/ga4.md § key-events | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/delete
-def delete_key_event(property_id, creds, event_name):
+def delete_key_event(property_id, creds, event_name, as_json=False):
     """Delete a keyEvent by event name. Returns True if deleted, False if not found."""
     pid = _normalise_property(property_id)
     target = None
-    for existing in list_key_events(pid, creds):
+    for existing in list_key_events(pid, creds, as_json=False):
         if existing.get("eventName") == event_name:
             target = existing
             break
@@ -189,8 +235,8 @@ def delete_key_event(property_id, creds, event_name):
     resp = requests.delete(url, headers=get_bearer_headers(creds), timeout=30)
     if resp.status_code in (200, 204):
         return True
-    _raise_for_admin_status(resp, f"deleting keyEvent {event_name!r}")
-    return True  # unreachable — _raise_for_admin_status exits on any >=400
+    _handle_admin_error(resp, f"deleting keyEvent {event_name!r}", url, as_json=as_json)
+    return True  # unreachable — _handle_admin_error exits on any >=400
 
 
 # ── Data API: Batch / Pivot / Compatibility ──────────────────────────────────

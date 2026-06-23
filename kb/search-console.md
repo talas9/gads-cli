@@ -442,7 +442,7 @@ Cause: Access token expired (typically 1-hour lifetime). Refresh using the refre
 
 ## URL Inspection API
 
-**This is a CLI gap — not yet implemented in `gads_lib/gsc.py`.**
+**Implemented in `gads_lib/gsc.py` as `gsc_url_inspect()`.**
 
 Uses a **different base URL**: `https://searchconsole.googleapis.com/v1`
 
@@ -663,16 +663,14 @@ Current `gads_lib/gsc.py` uses:
 | `aggregationType` | Unknown — check source | Default is `"auto"` |
 | `dimensionFilterGroups[]` | Likely not used | Allows server-side filtering before aggregation |
 | Hourly data (`dataState: "hourly_all"`) | No | Added April 2025; needs `hour` dimension |
-| `sitemaps.*` | No | Not implemented |
+| `sitemaps.*` | Yes | `gsc_list_sitemaps()` implemented in `gads_lib/gsc.py` |
 | `sites.get / add / delete` | No | Not implemented |
-| URL Inspection API | No | Separate base URL (`searchconsole.googleapis.com/v1`); same OAuth token; 2,000 QPD per site limit |
+| URL Inspection API | Yes | `gsc_url_inspect()` in `gads_lib/gsc.py`; base URL `searchconsole.googleapis.com/v1`; 2,000 QPD per site limit |
 
 **Coverage gaps worth noting for future work:**
 1. **No pagination** — queries returning exactly `rowLimit` rows are silently truncated; add `startRow` loop
 2. **`dataState` not configurable** — cannot request fresher data when needed; default is `"final"` (~3 day lag)
 3. **No `dimensionFilterGroups`** — all filtering is done client-side after fetching; server-side filtering is cheaper and avoids rowLimit truncation
-4. **No URL Inspection API** — cannot programmatically check index coverage status of individual pages
-5. **No sitemap submission/monitoring**
 
 ---
 

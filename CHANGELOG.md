@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.2] - 2026-06-23
+
+### Fixed
+
+- **Uniform error routing (ads.py):** All Google Ads API call sites (`run_gaql`, `ads_search`, `ads_mutate`, `ads_batch_mutate`, `ads_upload_click_conversions`, `generate_keyword_ideas`, `generate_keyword_forecast`, and the job-create/job-run calls in `audience_upload_csv`) now route through `request_json()` from `gads_lib.http`. Under `--json`, 4xx errors emit a classified JSON envelope `{"error": {"code": ..., "message": ..., "action": ..., ...}}` to stdout and exit with code 5 instead of printing raw text to stderr and exiting 1.
+- **Uniform error routing (ga4.py):** `list_key_events`, `create_key_event`, and `delete_key_event` now accept `as_json=False` parameter. A new `_handle_admin_error()` helper routes errors through `classify_api_error` + JSON envelope under `--json` (exit 5), while preserving the GA4-specific human-readable messages (analytics.edit scope hint, property ID hint) for human mode. `_raise_for_admin_status` now exits with code 5 (EXIT_CODES["API"]) instead of 1.
+- **Uniform error routing (gbp.py):** `gbp_multi_daily_metrics` replaced raw `requests.get` + manual error check with `request_json()`. Errors now classify through the standard 4-class system instead of printing raw text and exiting 1.
+- **partialFailure surface (cli.py):** `conversion_upload_cmd` now checks `result.get("partialFailureError")` after a successful HTTP 200 response. If partial failures exist, the command warns in human mode (per-conversion field path and error code) or returns a structured `{"status":"partial_failure",...}` JSON in `--json` mode, and exits 1. Previously it silently printed "✓ Conversion uploaded" even when some conversions failed.
+
+### Added
+
+- **`generate_keyword_ideas` and `generate_keyword_forecast` now accept `as_json=False`** so callers can propagate `--json` into the error envelope path.
+- **Test coverage expanded from 64 → 127 tests.** New tests cover every endpoint in `ads.py`, `ga4.py`, `gbp.py`, `gsc.py`, and `merchant.py` — request-construction correctness (URL, body, params) AND error-envelope behaviour under `as_json=True`. All tests are offline (mocked HTTP).
+
+### Changed
+
+- **KB drift corrected (kb/search-console.md, kb/INDEX.md):** `gsc_url_inspect()` and `gsc_list_sitemaps()` are now correctly documented as implemented. The "CLI gap — not yet implemented" label on the URL Inspection API section and the "Not implemented" row for `sitemaps.*` in the coverage table have been updated. The coverage-gaps list no longer includes items 4 (URL Inspection) and 5 (sitemaps) as gaps.
+- **Env dep floors met:** `requests` upgraded from 2.32.3 → 2.34.2 (floor >=2.33.0); `python-dotenv` upgraded from 1.0.1 → 1.2.2 (floor >=1.2.2). All 127 tests pass on the new versions.
+
 ## [3.8.1] - 2026-06-23
 ### Fixed
 - `--json` mode: classified access errors (API_NOT_ENABLED, MERCHANT_NOT_REGISTERED, INSUFFICIENT_SCOPE, PERMISSION_DENIED) now emit a parseable JSON envelope on STDOUT instead of printing human-readable advisory text to STDERR with empty STDOUT. Exit code 5 preserved. The interactive gcloud-enable offer is suppressed in JSON mode.

@@ -161,23 +161,16 @@ def gbp_multi_daily_metrics(creds, location_name, metrics, start_date, end_date)
         "dailyRange.endDate.month": em,
         "dailyRange.endDate.day": ed,
     }
-    # fetchMultiDailyMetricsTimeSeries uses repeated dailyMetrics param
+    # fetchMultiDailyMetricsTimeSeries uses repeated dailyMetrics param which
+    # can't be expressed as a dict (duplicate keys), so we pre-build the URL.
     param_str = "&".join(f"dailyMetrics={m}" for m in metrics)
     base_str = "&".join(f"{k}={v}" for k, v in params.items())
+    full_url = f"{GBP_PERF_BASE}/{location_name}:fetchMultiDailyMetricsTimeSeries?{param_str}&{base_str}"
 
-    import requests as _requests
-    resp = _requests.get(
-        f"{GBP_PERF_BASE}/{location_name}:fetchMultiDailyMetricsTimeSeries?{param_str}&{base_str}",
-        headers=get_bearer_headers(creds),
-        timeout=30,
-    )
-    if resp.status_code >= 400:
-        import click
-        click.secho(f"✗ API Error {resp.status_code}: {resp.text[:800]}", fg="red", err=True)
-        raise SystemExit(1)
+    data = request_json("GET", full_url, headers=get_bearer_headers(creds), timeout=30)
 
     result = {}
-    for group in resp.json().get("multiDailyMetricTimeSeries", []):
+    for group in data.get("multiDailyMetricTimeSeries", []):
         for series in group.get("dailyMetricTimeSeries", []):
             metric_name = series.get("dailyMetric", "UNKNOWN")
             values = []

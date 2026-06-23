@@ -288,13 +288,14 @@ class TestGAQLSelectOnlyGuard:
 
         fake_resp = MagicMock()
         fake_resp.status_code = 200
+        fake_resp.text = '[{"results": [{"campaign": {"name": "Test"}}]}]'
         fake_resp.json.return_value = [{"results": [{"campaign": {"name": "Test"}}]}]
 
-        with patch("requests.post", return_value=fake_resp) as mock_post:
+        with patch("requests.request", return_value=fake_resp) as mock_req:
             result = run_gaql(fake_creds, "SELECT campaign.name FROM campaign LIMIT 1")
 
-        assert mock_post.called
-        called_url = mock_post.call_args[0][0]
+        assert mock_req.called
+        called_url = mock_req.call_args[0][1]  # 2nd positional arg is url
         assert "searchStream" in called_url
 
         assert result == [{"campaign": {"name": "Test"}}]
@@ -307,22 +308,22 @@ class TestGAQLSelectOnlyGuard:
         fake_resp.status_code = 400
         fake_resp.text = "Bad Request: invalid operation"
 
-        with patch("requests.post", return_value=fake_resp):
+        with patch("requests.request", return_value=fake_resp):
             with pytest.raises(SystemExit):
                 ads_mutate(fake_creds, "campaigns", [{"badOp": {}}])
 
     def test_run_gaql_raises_sysexit_on_api_error(self, fake_creds):
-        """run_gaql raises SystemExit(1) when the API returns a non-200 status."""
+        """run_gaql raises SystemExit(5) when the API returns a non-200 status."""
         from gads_lib.ads import run_gaql
 
         fake_resp = MagicMock()
         fake_resp.status_code = 403
         fake_resp.text = "Forbidden"
 
-        with patch("requests.post", return_value=fake_resp):
+        with patch("requests.request", return_value=fake_resp):
             with pytest.raises(SystemExit) as exc_info:
                 run_gaql(fake_creds, "SELECT campaign.name FROM campaign")
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == 5  # EXIT_CODES["API"] after routing through request_json
 
 
 # =============================================================================
@@ -532,14 +533,13 @@ class TestVersion:
                 f"Version part {part!r} is not numeric in {gads_lib.__version__!r}"
             )
 
-    def test_version_is_3_8_1(self):
-        """gads_lib.__version__ == '3.8.1' — EXPECTED TO FAIL until version bumped."""
+    def test_version_is_3_8_2(self):
+        """gads_lib.__version__ == '3.8.2'."""
         import gads_lib
 
-        # This test intentionally fails at v3.8.0 to signal the pending version bump.
-        assert gads_lib.__version__ == "3.8.1", (
-            f"Expected version 3.8.1, got {gads_lib.__version__!r}. "
-            "Bump __version__ in gads_lib/__init__.py when releasing v3.8.1."
+        assert gads_lib.__version__ == "3.8.2", (
+            f"Expected version 3.8.2, got {gads_lib.__version__!r}. "
+            "Bump __version__ in gads_lib/__init__.py when releasing v3.8.2."
         )
 
 
@@ -718,11 +718,12 @@ class TestAdsSearchPagination:
 
         fake_resp = MagicMock()
         fake_resp.status_code = 200
+        fake_resp.text = '{"results": [{"campaign": {"name": "A"}}, {"campaign": {"name": "B"}}]}'
         fake_resp.json.return_value = {
             "results": [{"campaign": {"name": "A"}}, {"campaign": {"name": "B"}}]
         }
 
-        with patch("requests.post", return_value=fake_resp):
+        with patch("requests.request", return_value=fake_resp):
             results = ads_search(fake_creds, "SELECT campaign.name FROM campaign")
 
         assert len(results) == 2
@@ -734,18 +735,20 @@ class TestAdsSearchPagination:
 
         page1 = MagicMock()
         page1.status_code = 200
+        page1.text = '{"results": [{"campaign": {"name": "P1"}}], "nextPageToken": "tok123"}'
         page1.json.return_value = {
             "results": [{"campaign": {"name": "P1"}}],
             "nextPageToken": "tok123",
         }
         page2 = MagicMock()
         page2.status_code = 200
+        page2.text = '{"results": [{"campaign": {"name": "P2"}}]}'
         page2.json.return_value = {
             "results": [{"campaign": {"name": "P2"}}],
             # no nextPageToken → stop
         }
 
-        with patch("requests.post", side_effect=[page1, page2]):
+        with patch("requests.request", side_effect=[page1, page2]):
             results = ads_search(fake_creds, "SELECT campaign.name FROM campaign")
 
         assert len(results) == 2
@@ -1081,3 +1084,1425 @@ class TestJsonModeAccessErrors:
         captured = capsys.readouterr()
         assert captured.out == "", f"Expected empty STDOUT in non-JSON mode, got: {captured.out!r}"
         assert captured.err, "Expected human-readable advisory on STDERR in non-JSON mode"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP A — ads.py: batch mutate + conversion upload + keyword ideas/forecast
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAdsBatchMutate:
+    """ads_batch_mutate — cross-resource batch operation."""
+
+    def test_url_contains_googleads_mutate(self, fake_creds):
+        """URL must use googleAds:mutate, not a resource-specific path."""
+        from gads_lib.ads import ads_batch_mutate
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"mutateOperationResponses": []})
+        fake_resp.json.return_value = {"mutateOperationResponses": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_batch_mutate(fake_creds, [{"campaignOperation": {"create": {}}}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "googleAds:mutate" in called_url, f"Expected 'googleAds:mutate' in URL, got: {called_url}"
+
+    def test_body_uses_mutate_operations_key(self, fake_creds):
+        """Body must use 'mutateOperations' NOT 'operations' key (key API gotcha)."""
+        from gads_lib.ads import ads_batch_mutate
+
+        ops = [{"adGroupOperation": {"create": {"name": "test"}}}]
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"mutateOperationResponses": []})
+        fake_resp.json.return_value = {"mutateOperationResponses": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_batch_mutate(fake_creds, ops)
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "mutateOperations" in sent_body, "Body must have 'mutateOperations' key"
+        assert "operations" not in sent_body, "Body must NOT have bare 'operations' key"
+        assert sent_body["mutateOperations"] == ops
+
+
+class TestAdsUploadClickConversions:
+    """ads_upload_click_conversions — offline click conversion upload."""
+
+    def test_url_contains_upload_click_conversions(self, fake_creds):
+        from gads_lib.ads import ads_upload_click_conversions
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        conversions = [{"gclid": "abc123", "conversionDateTime": "2026-01-01 10:00:00+00:00"}]
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_upload_click_conversions(fake_creds, conversions, "customers/1/conversionActions/42")
+
+        called_url = mock_req.call_args[0][1]
+        assert "uploadClickConversions" in called_url
+
+    def test_body_has_conversions_and_partial_failure(self, fake_creds):
+        from gads_lib.ads import ads_upload_click_conversions
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        conversions = [{"gclid": "abc123", "conversionDateTime": "2026-01-01 10:00:00+00:00"}]
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_upload_click_conversions(fake_creds, conversions, "customers/1/conversionActions/42")
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "conversions" in sent_body
+        assert sent_body["partialFailure"] is True
+
+    def test_conversion_action_injected_into_each_item(self, fake_creds):
+        from gads_lib.ads import ads_upload_click_conversions
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        conversions = [
+            {"gclid": "abc1", "conversionDateTime": "2026-01-01 10:00:00+00:00"},
+            {"gclid": "abc2", "conversionDateTime": "2026-01-02 10:00:00+00:00"},
+        ]
+        action_id = "customers/1/conversionActions/99"
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_upload_click_conversions(fake_creds, conversions, action_id)
+
+        sent_body = mock_req.call_args[1]["json"]
+        for item in sent_body["conversions"]:
+            assert item["conversionAction"] == action_id
+
+
+class TestAdsUploadClickConversionsPartialFailure:
+    """ads_upload_click_conversions — partialFailureError passthrough."""
+
+    def test_partial_failure_error_returned_as_dict(self, fake_creds):
+        """When API returns partialFailureError the caller gets the raw dict."""
+        from gads_lib.ads import ads_upload_click_conversions
+
+        api_resp = {
+            "results": [{}],
+            "partialFailureError": {
+                "code": 3,
+                "message": "Partial failure",
+                "details": [],
+            },
+        }
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(api_resp)
+        fake_resp.json.return_value = api_resp
+
+        with patch("requests.request", return_value=fake_resp):
+            result = ads_upload_click_conversions(
+                fake_creds,
+                [{"gclid": "x"}],
+                "customers/1/conversionActions/5",
+            )
+
+        assert "partialFailureError" in result
+        assert result["partialFailureError"]["code"] == 3
+
+
+class TestGenerateKeywordIdeas:
+    """generate_keyword_ideas — keyword planner ideas endpoint."""
+
+    def test_url_contains_generate_keyword_ideas(self, fake_creds):
+        from gads_lib.ads import generate_keyword_ideas
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            generate_keyword_ideas(fake_creds, keywords=["tesla parts"])
+
+        called_url = mock_req.call_args[0][1]
+        assert "generateKeywordIdeas" in called_url
+
+    def test_keyword_only_uses_keyword_seed(self, fake_creds):
+        from gads_lib.ads import generate_keyword_ideas
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            generate_keyword_ideas(fake_creds, keywords=["tesla parts", "tesla bumper"])
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "keywordSeed" in sent_body
+        assert "urlSeed" not in sent_body
+        assert "keywordAndUrlSeed" not in sent_body
+        assert "keywords" in sent_body["keywordSeed"]
+
+    def test_url_only_uses_url_seed(self, fake_creds):
+        from gads_lib.ads import generate_keyword_ideas
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            generate_keyword_ideas(fake_creds, url="https://talas.ae")
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "urlSeed" in sent_body
+        assert "keywordSeed" not in sent_body
+
+    def test_403_as_json_emits_envelope_and_exits_5(self, fake_creds, capsys):
+        """403 with as_json=True should emit JSON envelope to stdout and raise SystemExit(5)."""
+        from gads_lib.ads import generate_keyword_ideas
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "The caller does not have permission",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                generate_keyword_ideas(fake_creds, keywords=["tesla parts"], as_json=True)
+
+        assert exc_info.value.code == 5
+        captured = capsys.readouterr()
+        assert captured.out.strip(), "Expected JSON envelope on stdout"
+        data = json.loads(captured.out)
+        assert "error" in data
+
+
+class TestGenerateKeywordForecast:
+    """generate_keyword_forecast — keyword planner forecast endpoint."""
+
+    def test_url_contains_generate_keyword_forecast(self, fake_creds):
+        from gads_lib.ads import generate_keyword_forecast
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"campaignForecast": {}})
+        fake_resp.json.return_value = {"campaignForecast": {}}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            generate_keyword_forecast(fake_creds, keywords=["tesla parts"])
+
+        called_url = mock_req.call_args[0][1]
+        assert "generateKeywordForecastMetrics" in called_url
+
+    def test_body_has_campaign_with_ad_groups(self, fake_creds):
+        from gads_lib.ads import generate_keyword_forecast
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"campaignForecast": {}})
+        fake_resp.json.return_value = {"campaignForecast": {}}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            generate_keyword_forecast(fake_creds, keywords=["tesla parts", "tesla bumper"])
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "campaign" in sent_body
+        assert "adGroups" in sent_body["campaign"]
+        assert len(sent_body["campaign"]["adGroups"]) > 0
+        assert "keywords" in sent_body["campaign"]["adGroups"][0]
+
+    def test_forecast_period_present_in_body(self, fake_creds):
+        from gads_lib.ads import generate_keyword_forecast
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"campaignForecast": {}})
+        fake_resp.json.return_value = {"campaignForecast": {}}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            generate_keyword_forecast(fake_creds, keywords=["tesla"])
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "forecastPeriod" in sent_body
+        assert "startDate" in sent_body["forecastPeriod"]
+        assert "endDate" in sent_body["forecastPeriod"]
+
+
+class TestAudienceUploadCsv:
+    """audience_upload_csv — Customer Match CSV upload (3 HTTP calls)."""
+
+    def test_job_create_add_and_run_calls(self, fake_creds, tmp_path):
+        """All 3 HTTP calls happen: job create, addOperations, run."""
+        from gads_lib.ads import audience_upload_csv
+
+        # Write a minimal CSV
+        csv_file = tmp_path / "contacts.csv"
+        csv_file.write_text(
+            "Phone,Email,First Name,Last Name,Country\n"
+            "+971501234567,user@example.com,John,Doe,AE\n"
+        )
+
+        job_rn = "customers/1234567890/offlineUserDataJobs/job-001"
+
+        create_resp = MagicMock()
+        create_resp.status_code = 200
+        create_resp.text = json.dumps({"resourceName": job_rn})
+        create_resp.json.return_value = {"resourceName": job_rn}
+
+        run_resp = MagicMock()
+        run_resp.status_code = 200
+        run_resp.text = json.dumps({})
+        run_resp.json.return_value = {}
+
+        batch_resp = MagicMock()
+        batch_resp.status_code = 200
+        batch_resp.text = json.dumps({"totalOperationsCount": 1})
+        batch_resp.json.return_value = {"totalOperationsCount": 1}
+
+        with patch("requests.request", side_effect=[create_resp, run_resp]) as mock_request, \
+             patch("requests.post", return_value=batch_resp) as mock_post:
+            returned_job, stats = audience_upload_csv(
+                fake_creds,
+                "customers/1234567890/userLists/list-001",
+                str(csv_file),
+            )
+
+        assert returned_job == job_rn
+        assert stats["job"] == job_rn
+        assert stats["rows_uploaded"] >= 1
+
+        # Verify job create call (first requests.request call)
+        assert mock_request.call_count == 2
+        create_call_url = mock_request.call_args_list[0][0][1]
+        assert "offlineUserDataJobs:create" in create_call_url
+
+        # Verify run call (second requests.request call)
+        run_call_url = mock_request.call_args_list[1][0][1]
+        assert ":run" in run_call_url
+
+        # Verify addOperations batch call used requests.post
+        assert mock_post.called
+        add_url = mock_post.call_args[0][0]
+        assert "addOperations" in add_url
+
+    def test_job_payload_includes_consent(self, fake_creds, tmp_path):
+        """Job creation payload must include consent fields."""
+        from gads_lib.ads import audience_upload_csv
+
+        csv_file = tmp_path / "contacts2.csv"
+        csv_file.write_text(
+            "Phone,Email,First Name,Last Name,Country\n"
+            "+971501234567,user@example.com,Alice,Smith,AE\n"
+        )
+        job_rn = "customers/1234567890/offlineUserDataJobs/j2"
+
+        create_resp = MagicMock()
+        create_resp.status_code = 200
+        create_resp.text = json.dumps({"resourceName": job_rn})
+        create_resp.json.return_value = {"resourceName": job_rn}
+
+        run_resp = MagicMock()
+        run_resp.status_code = 200
+        run_resp.text = json.dumps({})
+        run_resp.json.return_value = {}
+
+        batch_resp = MagicMock()
+        batch_resp.status_code = 200
+        batch_resp.text = json.dumps({})
+        batch_resp.json.return_value = {}
+
+        with patch("requests.request", side_effect=[create_resp, run_resp]) as mock_request, \
+             patch("requests.post", return_value=batch_resp):
+            audience_upload_csv(
+                fake_creds,
+                "customers/1234567890/userLists/list-001",
+                str(csv_file),
+            )
+
+        create_body = mock_request.call_args_list[0][1]["json"]
+        consent = create_body["job"]["customerMatchUserListMetadata"]["consent"]
+        assert consent["adUserData"] == "GRANTED"
+        assert consent["adPersonalization"] == "GRANTED"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP B — ga4.py: key events (list / create / delete) + batch/pivot/compat
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestListKeyEvents:
+    """list_key_events — GA4 Admin API, uses raw requests.get."""
+
+    def test_url_contains_v1beta_and_key_events(self, fake_creds):
+        from gads_lib.ga4 import list_key_events
+
+        api_resp = {"keyEvents": [{"eventName": "purchase", "countingMethod": "ONCE_PER_EVENT"}]}
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(api_resp)
+        fake_resp.json.return_value = api_resp
+
+        with patch("requests.get", return_value=fake_resp) as mock_get:
+            result = list_key_events("271773771", fake_creds)
+
+        called_url = mock_get.call_args[0][0]
+        assert "v1beta" in called_url
+        assert "keyEvents" in called_url
+        assert result[0]["eventName"] == "purchase"
+
+    def test_403_as_json_emits_envelope_and_exits_5(self, fake_creds, capsys):
+        from gads_lib.ga4 import list_key_events
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "Request had insufficient authentication scopes. INSUFFICIENT_AUTHENTICATION_SCOPES",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.get", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                list_key_events("271773771", fake_creds, as_json=True)
+
+        assert exc_info.value.code == 5
+        captured = capsys.readouterr()
+        assert captured.out.strip()
+        data = json.loads(captured.out)
+        assert "error" in data
+
+    def test_pagination_collects_all_events(self, fake_creds):
+        """Pagination loop: two pages are merged into one list."""
+        from gads_lib.ga4 import list_key_events
+
+        page1 = {"keyEvents": [{"eventName": "purchase"}], "nextPageToken": "tok1"}
+        page2 = {"keyEvents": [{"eventName": "add_to_cart"}]}
+
+        resp1 = MagicMock()
+        resp1.status_code = 200
+        resp1.text = json.dumps(page1)
+        resp1.json.return_value = page1
+
+        resp2 = MagicMock()
+        resp2.status_code = 200
+        resp2.text = json.dumps(page2)
+        resp2.json.return_value = page2
+
+        with patch("requests.get", side_effect=[resp1, resp2]):
+            result = list_key_events("271773771", fake_creds)
+
+        assert len(result) == 2
+        names = {e["eventName"] for e in result}
+        assert names == {"purchase", "add_to_cart"}
+
+
+class TestCreateKeyEvent:
+    """create_key_event — GA4 Admin API, uses raw requests.post."""
+
+    def test_body_has_event_name_and_counting_method(self, fake_creds):
+        from gads_lib.ga4 import create_key_event
+
+        api_resp = {
+            "eventName": "whatsapp_click",
+            "countingMethod": "ONCE_PER_SESSION",
+            "name": "properties/271773771/keyEvents/ke123",
+        }
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(api_resp)
+        fake_resp.json.return_value = api_resp
+
+        with patch("requests.post", return_value=fake_resp) as mock_post:
+            result = create_key_event("271773771", fake_creds, "whatsapp_click")
+
+        sent_body = mock_post.call_args[1]["json"]
+        assert "eventName" in sent_body
+        assert "countingMethod" in sent_body
+        assert result["_already_exists"] is False
+
+    def test_409_returns_existing_event(self, fake_creds):
+        """409 Conflict: function lists existing events and returns matching one."""
+        from gads_lib.ga4 import create_key_event
+
+        conflict_resp = MagicMock()
+        conflict_resp.status_code = 409
+        conflict_resp.text = "Conflict"
+
+        existing_events = {"keyEvents": [
+            {
+                "eventName": "whatsapp_click",
+                "countingMethod": "ONCE_PER_SESSION",
+                "name": "properties/271773771/keyEvents/ke42",
+            }
+        ]}
+        list_resp = MagicMock()
+        list_resp.status_code = 200
+        list_resp.text = json.dumps(existing_events)
+        list_resp.json.return_value = existing_events
+
+        with patch("requests.post", return_value=conflict_resp), \
+             patch("requests.get", return_value=list_resp):
+            result = create_key_event("271773771", fake_creds, "whatsapp_click")
+
+        assert result["eventName"] == "whatsapp_click"
+        assert result["_already_exists"] is True
+
+    def test_invalid_counting_method_raises(self, fake_creds):
+        from gads_lib.ga4 import create_key_event
+
+        with pytest.raises(ValueError, match="counting_method"):
+            create_key_event("271773771", fake_creds, "purchase", counting_method="INVALID")
+
+    def test_403_as_json_emits_envelope_and_exits_5(self, fake_creds, capsys):
+        from gads_lib.ga4 import create_key_event
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "Request had insufficient authentication scopes. INSUFFICIENT_AUTHENTICATION_SCOPES",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.post", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                create_key_event("271773771", fake_creds, "purchase", as_json=True)
+
+        assert exc_info.value.code == 5
+        captured = capsys.readouterr()
+        assert captured.out.strip()
+        data = json.loads(captured.out)
+        assert "error" in data
+
+
+class TestDeleteKeyEvent:
+    """delete_key_event — lists first, then deletes by resource name."""
+
+    def test_200_returns_true(self, fake_creds):
+        from gads_lib.ga4 import delete_key_event
+
+        existing_events = {"keyEvents": [
+            {
+                "eventName": "purchase",
+                "countingMethod": "ONCE_PER_EVENT",
+                "name": "properties/271773771/keyEvents/ke99",
+            }
+        ]}
+        list_resp = MagicMock()
+        list_resp.status_code = 200
+        list_resp.text = json.dumps(existing_events)
+        list_resp.json.return_value = existing_events
+
+        delete_resp = MagicMock()
+        delete_resp.status_code = 200
+        delete_resp.text = json.dumps({})
+        delete_resp.json.return_value = {}
+
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.delete", return_value=delete_resp):
+            result = delete_key_event("271773771", fake_creds, "purchase")
+
+        assert result is True
+
+    def test_not_found_returns_false(self, fake_creds):
+        """Event not in list: returns False without making delete call."""
+        from gads_lib.ga4 import delete_key_event
+
+        existing_events = {"keyEvents": []}
+        list_resp = MagicMock()
+        list_resp.status_code = 200
+        list_resp.text = json.dumps(existing_events)
+        list_resp.json.return_value = existing_events
+
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.delete") as mock_delete:
+            result = delete_key_event("271773771", fake_creds, "nonexistent_event")
+
+        assert result is False
+        mock_delete.assert_not_called()
+
+    def test_delete_url_uses_resource_name(self, fake_creds):
+        """Delete call URL contains the resource name returned by list."""
+        from gads_lib.ga4 import delete_key_event
+
+        resource_name = "properties/271773771/keyEvents/ke55"
+        existing_events = {"keyEvents": [
+            {"eventName": "purchase", "name": resource_name, "countingMethod": "ONCE_PER_EVENT"}
+        ]}
+        list_resp = MagicMock()
+        list_resp.status_code = 200
+        list_resp.text = json.dumps(existing_events)
+        list_resp.json.return_value = existing_events
+
+        delete_resp = MagicMock()
+        delete_resp.status_code = 200
+        delete_resp.text = json.dumps({})
+        delete_resp.json.return_value = {}
+
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.delete", return_value=delete_resp) as mock_delete:
+            delete_key_event("271773771", fake_creds, "purchase")
+
+        delete_url = mock_delete.call_args[0][0]
+        assert resource_name in delete_url
+
+
+class TestGa4BatchRunReports:
+    """ga4_batch_run_reports — body must have 'requests' key."""
+
+    def test_body_has_requests_key(self, fake_creds):
+        from gads_lib.ga4 import ga4_batch_run_reports
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"reports": []})
+        fake_resp.json.return_value = {"reports": []}
+
+        requests_list = [
+            {
+                "dimensions": [{"name": "date"}],
+                "metrics": [{"name": "sessions"}],
+                "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}],
+            }
+        ]
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ga4_batch_run_reports(fake_creds, requests_list, property_id="271773771")
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "requests" in sent_body
+        assert sent_body["requests"] == requests_list
+
+    def test_url_contains_batch_run_reports(self, fake_creds):
+        from gads_lib.ga4 import ga4_batch_run_reports
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"reports": []})
+        fake_resp.json.return_value = {"reports": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ga4_batch_run_reports(fake_creds, [], property_id="271773771")
+
+        called_url = mock_req.call_args[0][1]
+        assert "batchRunReports" in called_url
+
+
+class TestGa4RunPivotReport:
+    """ga4_run_pivot_report — body must have 'pivots' key."""
+
+    def test_body_has_pivots_key(self, fake_creds):
+        from gads_lib.ga4 import ga4_run_pivot_report
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"pivotHeaders": [], "rows": []})
+        fake_resp.json.return_value = {"pivotHeaders": [], "rows": []}
+
+        pivots = [{"fieldNames": ["date"], "limit": 10}]
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ga4_run_pivot_report(
+                fake_creds,
+                dimensions=["date", "country"],
+                metrics=["sessions"],
+                date_ranges=[{"startDate": "7daysAgo", "endDate": "yesterday"}],
+                pivots=pivots,
+                property_id="271773771",
+            )
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "pivots" in sent_body
+        assert sent_body["pivots"] == pivots
+
+    def test_url_contains_run_pivot_report(self, fake_creds):
+        from gads_lib.ga4 import ga4_run_pivot_report
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"rows": []})
+        fake_resp.json.return_value = {"rows": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ga4_run_pivot_report(
+                fake_creds,
+                dimensions=["date"],
+                metrics=["sessions"],
+                date_ranges=[{"startDate": "7daysAgo", "endDate": "yesterday"}],
+                pivots=[],
+                property_id="271773771",
+            )
+
+        called_url = mock_req.call_args[0][1]
+        assert "runPivotReport" in called_url
+
+
+class TestGa4CheckCompatibility:
+    """ga4_check_compatibility — body must have 'dimensions' and 'metrics' keys."""
+
+    def test_body_has_dimensions_and_metrics(self, fake_creds):
+        from gads_lib.ga4 import ga4_check_compatibility
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"dimensionCompatibilities": [], "metricCompatibilities": []})
+        fake_resp.json.return_value = {"dimensionCompatibilities": [], "metricCompatibilities": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ga4_check_compatibility(
+                fake_creds,
+                dimensions=["date", "country"],
+                metrics=["sessions", "activeUsers"],
+                property_id="271773771",
+            )
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "dimensions" in sent_body
+        assert "metrics" in sent_body
+        dim_names = [d["name"] for d in sent_body["dimensions"]]
+        assert "date" in dim_names
+        assert "country" in dim_names
+
+    def test_url_contains_check_compatibility(self, fake_creds):
+        from gads_lib.ga4 import ga4_check_compatibility
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({})
+        fake_resp.json.return_value = {}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ga4_check_compatibility(
+                fake_creds,
+                dimensions=["date"],
+                metrics=["sessions"],
+                property_id="271773771",
+            )
+
+        called_url = mock_req.call_args[0][1]
+        assert "checkCompatibility" in called_url
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP C — gbp.py: reply review, delete reply, multi daily metrics, search
+#           keywords, local posts CRUD
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestGbpReplyReview:
+    """gbp_reply_review — PUT request with 'comment' in body."""
+
+    def test_put_request_with_comment_in_body(self, fake_creds):
+        from gads_lib.gbp import gbp_reply_review
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"comment": "Thank you!"})
+        fake_resp.json.return_value = {"comment": "Thank you!"}
+
+        review_name = "accounts/123/locations/456/reviews/review-789"
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_reply_review(fake_creds, review_name, "Thank you for your review!")
+
+        assert mock_req.call_args[0][0] == "PUT"
+        sent_body = mock_req.call_args[1]["json"]
+        assert "comment" in sent_body
+        assert "Thank you" in sent_body["comment"]
+
+    def test_url_contains_review_name_and_reply(self, fake_creds):
+        from gads_lib.gbp import gbp_reply_review
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({})
+        fake_resp.json.return_value = {}
+
+        review_name = "accounts/123/locations/456/reviews/rev-001"
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_reply_review(fake_creds, review_name, "Great!")
+
+        called_url = mock_req.call_args[0][1]
+        assert review_name in called_url
+        assert "reply" in called_url
+
+
+class TestGbpDeleteReply:
+    """gbp_delete_reply — DELETE request."""
+
+    def test_delete_method_used(self, fake_creds):
+        from gads_lib.gbp import gbp_delete_reply
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({})
+        fake_resp.json.return_value = {}
+
+        review_name = "accounts/123/locations/456/reviews/rev-002"
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_delete_reply(fake_creds, review_name)
+
+        assert mock_req.call_args[0][0] == "DELETE"
+        called_url = mock_req.call_args[0][1]
+        assert review_name in called_url
+        assert "reply" in called_url
+
+
+class TestGbpMultiDailyMetrics:
+    """gbp_multi_daily_metrics — uses request_json (requests.request) with pre-built URL."""
+
+    def test_url_contains_fetch_multi_daily(self, fake_creds):
+        from gads_lib.gbp import gbp_multi_daily_metrics
+
+        api_resp = {"multiDailyMetricTimeSeries": []}
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(api_resp)
+        fake_resp.json.return_value = api_resp
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_multi_daily_metrics(
+                fake_creds,
+                "locations/12345",
+                ["CALL_CLICKS", "WEBSITE_CLICKS"],
+                (2026, 4, 1),
+                (2026, 4, 7),
+            )
+
+        called_url = mock_req.call_args[0][1]
+        assert "fetchMultiDailyMetricsTimeSeries" in called_url
+
+    def test_metrics_in_url_as_repeated_params(self, fake_creds):
+        """Metrics are added as repeated dailyMetrics= params in the pre-built URL."""
+        from gads_lib.gbp import gbp_multi_daily_metrics
+
+        api_resp = {"multiDailyMetricTimeSeries": []}
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(api_resp)
+        fake_resp.json.return_value = api_resp
+
+        metrics = ["CALL_CLICKS", "WEBSITE_CLICKS"]
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_multi_daily_metrics(
+                fake_creds,
+                "locations/12345",
+                metrics,
+                (2026, 4, 1),
+                (2026, 4, 7),
+            )
+
+        called_url = mock_req.call_args[0][1]
+        for m in metrics:
+            assert f"dailyMetrics={m}" in called_url
+
+    def test_parses_response_into_dict(self, fake_creds):
+        """Returned dict maps metric names to lists of date/value dicts."""
+        from gads_lib.gbp import gbp_multi_daily_metrics
+
+        api_resp = {
+            "multiDailyMetricTimeSeries": [
+                {
+                    "dailyMetricTimeSeries": [
+                        {
+                            "dailyMetric": "CALL_CLICKS",
+                            "timeSeries": {
+                                "datedValues": [
+                                    {"date": {"year": 2026, "month": 4, "day": 1}, "value": 5},
+                                ]
+                            },
+                        }
+                    ]
+                }
+            ]
+        }
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(api_resp)
+        fake_resp.json.return_value = api_resp
+
+        with patch("requests.request", return_value=fake_resp):
+            result = gbp_multi_daily_metrics(
+                fake_creds,
+                "locations/12345",
+                ["CALL_CLICKS"],
+                (2026, 4, 1),
+                (2026, 4, 1),
+            )
+
+        assert "CALL_CLICKS" in result
+        assert result["CALL_CLICKS"][0]["value"] == 5
+        assert result["CALL_CLICKS"][0]["date"] == "2026-04-01"
+
+    def test_403_exits_with_code_5(self, fake_creds):
+        """403 from the API raises SystemExit with code 5, not 1."""
+        from gads_lib.gbp import gbp_multi_daily_metrics
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "The caller does not have permission",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                gbp_multi_daily_metrics(
+                    fake_creds,
+                    "locations/12345",
+                    ["CALL_CLICKS"],
+                    (2026, 4, 1),
+                    (2026, 4, 7),
+                )
+
+        assert exc_info.value.code == 5
+
+
+class TestGbpSearchKeywordsMonthly:
+    """gbp_search_keywords_monthly — URL contains searchkeywords/impressions/monthly."""
+
+    def test_url_contains_search_keywords_monthly(self, fake_creds):
+        from gads_lib.gbp import gbp_search_keywords_monthly
+
+        api_resp = {"searchKeywordsCounts": []}
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(api_resp)
+        fake_resp.json.return_value = api_resp
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_search_keywords_monthly(
+                fake_creds,
+                "locations/12345",
+                start_month=(2026, 1),
+                end_month=(2026, 3),
+            )
+
+        called_url = mock_req.call_args[0][1]
+        assert "searchkeywords/impressions/monthly" in called_url
+
+    def test_returns_sorted_keywords_descending(self, fake_creds):
+        """Result is sorted by impressions descending."""
+        from gads_lib.gbp import gbp_search_keywords_monthly
+
+        api_resp = {
+            "searchKeywordsCounts": [
+                {"searchKeyword": "tesla parts", "insightsValue": {"value": 100}},
+                {"searchKeyword": "tesla bumper", "insightsValue": {"value": 200}},
+            ]
+        }
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(api_resp)
+        fake_resp.json.return_value = api_resp
+
+        with patch("requests.request", return_value=fake_resp):
+            result = gbp_search_keywords_monthly(
+                fake_creds,
+                "locations/12345",
+                start_month=(2026, 1),
+                end_month=(2026, 3),
+            )
+
+        assert result[0]["keyword"] == "tesla bumper"
+        assert result[0]["impressions"] == 200
+
+
+class TestGbpListLocalPosts:
+    """gbp_list_local_posts — URL contains localPosts."""
+
+    def test_url_contains_local_posts(self, fake_creds):
+        from gads_lib.gbp import gbp_list_local_posts
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"localPosts": []})
+        fake_resp.json.return_value = {"localPosts": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_list_local_posts(fake_creds, "accounts/123", "456")
+
+        called_url = mock_req.call_args[0][1]
+        assert "localPosts" in called_url
+        assert "accounts/123" in called_url
+
+
+class TestGbpCreateLocalPost:
+    """gbp_create_local_post — POST with body."""
+
+    def test_post_with_body(self, fake_creds):
+        from gads_lib.gbp import gbp_create_local_post
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"name": "accounts/123/locations/456/localPosts/789"})
+        fake_resp.json.return_value = {"name": "accounts/123/locations/456/localPosts/789"}
+
+        post_body = {
+            "languageCode": "en",
+            "summary": "New Tesla parts now available",
+            "callToAction": {"actionType": "LEARN_MORE", "url": "https://talas.ae"},
+            "topicType": "STANDARD",
+        }
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_create_local_post(fake_creds, "accounts/123", "456", post_body)
+
+        assert mock_req.call_args[0][0] == "POST"
+        called_url = mock_req.call_args[0][1]
+        assert "localPosts" in called_url
+        sent_body = mock_req.call_args[1]["json"]
+        assert sent_body["summary"] == "New Tesla parts now available"
+
+
+class TestGbpDeleteLocalPost:
+    """gbp_delete_local_post — DELETE request."""
+
+    def test_delete_request(self, fake_creds):
+        from gads_lib.gbp import gbp_delete_local_post
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({})
+        fake_resp.json.return_value = {}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gbp_delete_local_post(fake_creds, "accounts/123", "456", "post-789")
+
+        assert mock_req.call_args[0][0] == "DELETE"
+        called_url = mock_req.call_args[0][1]
+        assert "post-789" in called_url
+        assert "localPosts" in called_url
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP D — gsc.py: list_sites, url_inspect, list_sitemaps
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestGscListSites:
+    """gsc_list_sites — URL contains 'sites'."""
+
+    def test_url_contains_sites(self, fake_creds):
+        from gads_lib.gsc import gsc_list_sites
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"siteEntry": []})
+        fake_resp.json.return_value = {"siteEntry": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gsc_list_sites(fake_creds)
+
+        called_url = mock_req.call_args[0][1]
+        assert "sites" in called_url
+        assert "webmasters/v3" in called_url
+
+    def test_returns_api_response(self, fake_creds):
+        from gads_lib.gsc import gsc_list_sites
+
+        expected = {"siteEntry": [{"siteUrl": "https://talas.ae/", "permissionLevel": "siteOwner"}]}
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps(expected)
+        fake_resp.json.return_value = expected
+
+        with patch("requests.request", return_value=fake_resp):
+            result = gsc_list_sites(fake_creds)
+
+        assert result == expected
+
+
+class TestGscUrlInspect:
+    """gsc_url_inspect — POST to searchconsole.googleapis.com/v1."""
+
+    def test_url_contains_url_inspection(self, fake_creds):
+        from gads_lib.gsc import gsc_url_inspect
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"inspectionResult": {}})
+        fake_resp.json.return_value = {"inspectionResult": {}}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gsc_url_inspect(
+                fake_creds,
+                inspection_url="https://talas.ae/products/tesla-bumper",
+                site_url="https://talas.ae/",
+            )
+
+        called_url = mock_req.call_args[0][1]
+        assert "searchconsole.googleapis.com" in called_url
+        assert "urlInspection" in called_url
+
+    def test_body_has_inspection_url_and_site_url(self, fake_creds):
+        from gads_lib.gsc import gsc_url_inspect
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"inspectionResult": {}})
+        fake_resp.json.return_value = {"inspectionResult": {}}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gsc_url_inspect(
+                fake_creds,
+                inspection_url="https://talas.ae/products/tesla-bumper",
+                site_url="https://talas.ae/",
+            )
+
+        assert mock_req.call_args[0][0] == "POST"
+        sent_body = mock_req.call_args[1]["json"]
+        assert "inspectionUrl" in sent_body
+        assert "siteUrl" in sent_body
+        assert sent_body["inspectionUrl"] == "https://talas.ae/products/tesla-bumper"
+        assert sent_body["siteUrl"] == "https://talas.ae/"
+
+    def test_language_code_included_in_body(self, fake_creds):
+        from gads_lib.gsc import gsc_url_inspect
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({})
+        fake_resp.json.return_value = {}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gsc_url_inspect(
+                fake_creds,
+                inspection_url="https://talas.ae/",
+                site_url="https://talas.ae/",
+                language_code="ar",
+            )
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert sent_body["languageCode"] == "ar"
+
+
+class TestGscListSitemaps:
+    """gsc_list_sitemaps — GET URL contains 'sitemaps'."""
+
+    def test_url_contains_sitemaps(self, fake_creds):
+        from gads_lib.gsc import gsc_list_sitemaps
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"sitemap": []})
+        fake_resp.json.return_value = {"sitemap": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gsc_list_sitemaps(fake_creds, "https://talas.ae/")
+
+        called_url = mock_req.call_args[0][1]
+        assert "sitemaps" in called_url
+        assert "webmasters/v3" in called_url
+
+    def test_site_url_encoded_in_path(self, fake_creds):
+        """Site URL is URL-encoded and embedded in the path."""
+        from gads_lib.gsc import gsc_list_sitemaps
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"sitemap": []})
+        fake_resp.json.return_value = {"sitemap": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gsc_list_sitemaps(fake_creds, "https://talas.ae/")
+
+        called_url = mock_req.call_args[0][1]
+        # URL encoding: ':' -> %3A; the encoded site URL is in the path
+        assert "https%3A" in called_url or "talas.ae" in called_url
+
+    def test_sitemap_index_passed_as_param(self, fake_creds):
+        from gads_lib.gsc import gsc_list_sitemaps
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"sitemap": []})
+        fake_resp.json.return_value = {"sitemap": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            gsc_list_sitemaps(
+                fake_creds,
+                "https://talas.ae/",
+                sitemap_index="https://talas.ae/sitemap-index.xml",
+            )
+
+        params = mock_req.call_args[1].get("params")
+        assert params is not None
+        assert "sitemapIndex" in params
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP E — merchant.py: account, status, shipping, return policy, feeds, products
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMcGetAccount:
+    """mc_get_account — URL shape contains accounts/v1."""
+
+    def test_url_shape(self, fake_creds):
+        from gads_lib.merchant import mc_get_account
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"accountId": "88887777", "accountName": "Talas"})
+        fake_resp.json.return_value = {"accountId": "88887777", "accountName": "Talas"}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            mc_get_account(fake_creds)
+
+        called_url = mock_req.call_args[0][1]
+        assert "merchantapi.googleapis.com" in called_url
+        assert "accounts/v1" in called_url
+        assert "88887777" in called_url  # MERCHANT_CENTER_ID from conftest env
+
+    def test_get_method(self, fake_creds):
+        from gads_lib.merchant import mc_get_account
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({})
+        fake_resp.json.return_value = {}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            mc_get_account(fake_creds)
+
+        assert mock_req.call_args[0][0] == "GET"
+
+
+class TestMcGetAccountStatus:
+    """mc_get_account_status — URL contains 'issues'."""
+
+    def test_url_contains_issues(self, fake_creds):
+        from gads_lib.merchant import mc_get_account_status
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"accountIssues": []})
+        fake_resp.json.return_value = {"accountIssues": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            mc_get_account_status(fake_creds)
+
+        called_url = mock_req.call_args[0][1]
+        assert "issues" in called_url
+
+
+class TestMcGetShipping:
+    """mc_get_shipping — URL contains 'shippingSettings'."""
+
+    def test_url_contains_shipping_settings(self, fake_creds):
+        from gads_lib.merchant import mc_get_shipping
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"services": []})
+        fake_resp.json.return_value = {"services": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            mc_get_shipping(fake_creds)
+
+        called_url = mock_req.call_args[0][1]
+        assert "shippingSettings" in called_url
+
+
+class TestMcGetReturnPolicy:
+    """mc_get_return_policy — URL contains 'onlineReturnPolicies'."""
+
+    def test_url_contains_online_return_policies(self, fake_creds):
+        from gads_lib.merchant import mc_get_return_policy
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"onlineReturnPolicies": []})
+        fake_resp.json.return_value = {"onlineReturnPolicies": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            mc_get_return_policy(fake_creds)
+
+        called_url = mock_req.call_args[0][1]
+        assert "onlineReturnPolicies" in called_url
+
+
+class TestMcListDatafeeds:
+    """mc_list_datafeeds — URL contains 'dataSources'."""
+
+    def test_url_contains_data_sources(self, fake_creds):
+        from gads_lib.merchant import mc_list_datafeeds
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"dataSources": []})
+        fake_resp.json.return_value = {"dataSources": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            mc_list_datafeeds(fake_creds)
+
+        called_url = mock_req.call_args[0][1]
+        assert "dataSources" in called_url
+        assert "datasources/v1" in called_url
+
+
+class TestMcListProductStatuses:
+    """mc_list_product_statuses — URL contains products/v1."""
+
+    def test_url_contains_products_v1(self, fake_creds):
+        from gads_lib.merchant import mc_list_product_statuses
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"products": []})
+        fake_resp.json.return_value = {"products": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            mc_list_product_statuses(fake_creds)
+
+        called_url = mock_req.call_args[0][1]
+        assert "products/v1" in called_url
+
+    def test_response_has_products_key(self, fake_creds):
+        """Merchant API v1 folds productStatus into the products response."""
+        from gads_lib.merchant import mc_list_product_statuses
+
+        products = [
+            {
+                "name": "accounts/88887777/products/p1",
+                "offerId": "SKU-001",
+                "productStatus": {"destinationStatuses": [{"destination": "Shopping"}]},
+            }
+        ]
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"products": products})
+        fake_resp.json.return_value = {"products": products}
+
+        with patch("requests.request", return_value=fake_resp):
+            result = mc_list_product_statuses(fake_creds)
+
+        assert "products" in result
+        assert result["products"][0]["offerId"] == "SKU-001"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP F — Error envelope tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestErrorEnvelopes:
+    """Verify as_json=True error routing emits JSON envelope + exits 5."""
+
+    def test_generate_keyword_ideas_403_json_envelope(self, fake_creds, capsys):
+        from gads_lib.ads import generate_keyword_ideas
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "The caller does not have permission",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                generate_keyword_ideas(fake_creds, keywords=["tesla"], as_json=True)
+
+        assert exc_info.value.code == 5
+        out = capsys.readouterr().out
+        assert out.strip()
+        envelope = json.loads(out)
+        assert "error" in envelope
+
+    def test_list_key_events_403_insufficient_scope_json_envelope(self, fake_creds, capsys):
+        from gads_lib.ga4 import list_key_events
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "Request had insufficient authentication scopes. INSUFFICIENT_AUTHENTICATION_SCOPES",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.get", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                list_key_events("271773771", fake_creds, as_json=True)
+
+        assert exc_info.value.code == 5
+        out = capsys.readouterr().out
+        assert out.strip()
+        envelope = json.loads(out)
+        assert "error" in envelope
+
+    def test_gbp_multi_daily_metrics_403_exits_5_not_1(self, fake_creds):
+        """403 from gbp_multi_daily_metrics raises SystemExit(5), not SystemExit(1)."""
+        from gads_lib.gbp import gbp_multi_daily_metrics
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "The caller does not have permission",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                gbp_multi_daily_metrics(
+                    fake_creds,
+                    "locations/12345",
+                    ["CALL_CLICKS"],
+                    (2026, 4, 1),
+                    (2026, 4, 7),
+                )
+
+        assert exc_info.value.code == 5, (
+            f"Expected exit code 5 for API permission error, got {exc_info.value.code}"
+        )
+
+    def test_merchant_403_exits_5(self, fake_creds):
+        """Merchant API 403 exits with code 5; offer_gcloud_enable is mocked to avoid stdin prompt."""
+        from gads_lib.merchant import mc_get_account
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "merchantapi.googleapis.com has not been used in project",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.request", return_value=fake_resp), \
+             patch("gads_lib.http.offer_gcloud_enable"):
+            with pytest.raises(SystemExit) as exc_info:
+                mc_get_account(fake_creds)
+
+        assert exc_info.value.code == 5

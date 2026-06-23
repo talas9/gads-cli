@@ -9,6 +9,8 @@ import click
 import requests
 
 from .config import API_VERSION, CUSTOMER_ID, DEV_TOKEN, LOGIN_CUSTOMER_ID
+from .http import request_json
+from .output import EXIT_CODES, classify_api_error
 
 
 def get_ads_headers(creds):
@@ -36,19 +38,14 @@ def sanitize_keyword(keyword):
 # KB: kb/google-ads.md § searchStream | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/searchStream
 def run_gaql(creds, query):
     """Execute a GAQL query via the REST searchStream endpoint."""
-    resp = requests.post(
+    url = (
         f"https://googleads.googleapis.com/{API_VERSION}"
-        f"/customers/{CUSTOMER_ID}/googleAds:searchStream",
-        headers=get_ads_headers(creds),
-        json={"query": query},
+        f"/customers/{CUSTOMER_ID}/googleAds:searchStream"
     )
-    if resp.status_code != 200:
-        detail = resp.text[:800]
-        click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
-        raise SystemExit(1)
+    data = request_json("POST", url, headers=get_ads_headers(creds), json_body={"query": query})
 
     results = []
-    for batch in resp.json():
+    for batch in (data if isinstance(data, list) else [data]):
         results.extend(batch.get("results", []))
     return results
 
@@ -73,13 +70,7 @@ def ads_search(creds, query):
         if page_token:
             payload["pageToken"] = page_token
         
-        resp = requests.post(url, headers=headers, json=payload)
-        if resp.status_code != 200:
-            detail = resp.text[:800]
-            click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
-            raise SystemExit(1)
-        
-        data = resp.json()
+        data = request_json("POST", url, headers=headers, json_body=payload)
         results.extend(data.get("results", []))
         
         page_token = data.get("nextPageToken")
@@ -103,13 +94,7 @@ def ads_mutate(creds, resource_path, operations):
     headers = get_ads_headers(creds)
     payload = {"operations": operations}
     
-    resp = requests.post(url, headers=headers, json=payload)
-    if resp.status_code != 200:
-        detail = resp.text[:800]
-        click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
-        raise SystemExit(1)
-    
-    return resp.json()
+    return request_json("POST", url, headers=headers, json_body=payload)
 
 
 # KB: kb/google-ads.md § batch-mutate | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/mutate
@@ -127,13 +112,7 @@ def ads_batch_mutate(creds, mutate_operations):
     headers = get_ads_headers(creds)
     payload = {"mutateOperations": mutate_operations}
     
-    resp = requests.post(url, headers=headers, json=payload)
-    if resp.status_code != 200:
-        detail = resp.text[:800]
-        click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
-        raise SystemExit(1)
-    
-    return resp.json()
+    return request_json("POST", url, headers=headers, json_body=payload)
 
 
 # KB: kb/google-ads.md § conversion-upload | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/uploadClickConversions
@@ -161,17 +140,11 @@ def ads_upload_click_conversions(creds, conversions, conversion_action_id):
         "partialFailure": True,
     }
     
-    resp = requests.post(url, headers=headers, json=payload)
-    if resp.status_code != 200:
-        detail = resp.text[:800]
-        click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
-        raise SystemExit(1)
-    
-    return resp.json()
+    return request_json("POST", url, headers=headers, json_body=payload)
 
 
 # KB: kb/google-ads.md § keyword-ideas | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/generateKeywordIdeas
-def generate_keyword_ideas(creds, keywords=None, url=None, language_id="1000", geo_ids=None):
+def generate_keyword_ideas(creds, keywords=None, url=None, language_id="1000", geo_ids=None, as_json=False):
     """Generate keyword ideas.
 
     POST to /customers/{CID}:generateKeywordIdeas
@@ -209,17 +182,11 @@ def generate_keyword_ideas(creds, keywords=None, url=None, language_id="1000", g
     # Network: restrict to Google Search (recommended; avoids schema rejection)
     payload["keywordPlanNetwork"] = "GOOGLE_SEARCH"
 
-    resp = requests.post(url_endpoint, headers=headers, json=payload)
-    if resp.status_code != 200:
-        detail = resp.text[:800]
-        click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
-        raise SystemExit(1)
-
-    return resp.json()
+    return request_json("POST", url_endpoint, headers=headers, json_body=payload, as_json=as_json)
 
 
 # KB: kb/google-ads.md § keyword-forecast | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/generateKeywordForecastMetrics
-def generate_keyword_forecast(creds, keywords, language_id="1000", geo_ids=None):
+def generate_keyword_forecast(creds, keywords, language_id="1000", geo_ids=None, as_json=False):
     """Generate keyword forecast metrics.
 
     POST to /customers/{CID}:generateKeywordForecastMetrics (v24 body schema).
@@ -273,13 +240,7 @@ def generate_keyword_forecast(creds, keywords, language_id="1000", geo_ids=None)
             f"geoTargetConstants/{geo_id}" for geo_id in geo_ids
         ]
 
-    resp = requests.post(url_endpoint, headers=headers, json=payload)
-    if resp.status_code != 200:
-        detail = resp.text[:800]
-        click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
-        raise SystemExit(1)
-
-    return resp.json()
+    return request_json("POST", url_endpoint, headers=headers, json_body=payload, as_json=as_json)
 
 
 # ── Customer Match / Audience Upload ─────────────────────────
@@ -407,11 +368,8 @@ def audience_upload_csv(creds, list_resource_name, csv_path, batch_size=100, max
             }
         }
     }}
-    resp = requests.post(job_url, headers=headers, json=job_payload, timeout=120)
-    if resp.status_code != 200:
-        click.secho(f"✗ Create job failed: {resp.text[:500]}", fg="red", err=True)
-        raise SystemExit(1)
-    job_rn = resp.json()["resourceName"]
+    result = request_json("POST", job_url, headers=headers, json_body=job_payload, timeout=120)
+    job_rn = result["resourceName"]
     click.echo(f"  Job created: {job_rn}")
 
     # 2. Read CSV and build operations
@@ -452,19 +410,19 @@ def audience_upload_csv(creds, list_resource_name, csv_path, batch_size=100, max
                 time.sleep(delay)
             else:
                 click.secho(f"✗ Upload batch failed: {resp.text[:500]}", fg="red", err=True)
-                raise SystemExit(1)
+                classified = classify_api_error(resp.status_code, resp.text)
+                if classified:
+                    click.secho(f"  {classified.get('message', '')}", fg="yellow", err=True)
+                raise SystemExit(EXIT_CODES["API"])
         else:
             click.secho("✗ Upload failed after 5 retries (429)", fg="red", err=True)
-            raise SystemExit(1)
+            raise SystemExit(EXIT_CODES["API"])
 
     click.echo(f"  Uploaded: {uploaded} operations in {(len(rows) + batch_size - 1) // batch_size} batches")
 
     # 4. Run the job
     run_url = f"https://googleads.googleapis.com/{API_VERSION}/{job_rn}:run"
-    resp = requests.post(run_url, headers=headers, json={}, timeout=120)
-    if resp.status_code != 200:
-        click.secho(f"✗ Run job failed: {resp.text[:500]}", fg="red", err=True)
-        raise SystemExit(1)
+    request_json("POST", run_url, headers=headers, json_body={}, timeout=120)
 
     stats = {"job": job_rn, "rows_uploaded": uploaded, "total_csv_ops": len(rows)}
     return job_rn, stats

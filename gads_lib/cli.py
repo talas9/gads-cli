@@ -2838,6 +2838,26 @@ def conversion_upload_cmd(gclid, action_id, conv_time, value, currency, dry_run,
         return
     result = ads_upload_click_conversions(get_credentials(), [conv], action_id)
     _auto_log("conversion_upload", f"gclid={gclid}")
+
+    # Check for partial failures (API returns 200 but some conversions failed)
+    partial_error = result.get("partialFailureError")
+    if partial_error:
+        if as_json:
+            return print_json({"status": "partial_failure", "partialFailureError": partial_error, "result": result})
+        click.secho("⚠ Partial failure: some conversions were not uploaded", fg="yellow", err=True)
+        # Extract per-conversion errors from partial failure details
+        details = partial_error.get("details", [])
+        for detail in details:
+            for error in detail.get("errors", []):
+                loc = error.get("location", {})
+                field_path = ".".join(
+                    str(op.get("fieldName", op.get("index", "?")))
+                    for op in loc.get("fieldPathElements", [])
+                ) or "unknown"
+                msg = error.get("errorCode", {})
+                click.secho(f"  ✗ [{field_path}] {msg}", fg="red", err=True)
+        raise SystemExit(1)
+
     if as_json:
         return print_json(result)
     click.secho("✓ Conversion uploaded", fg="green")

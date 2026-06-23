@@ -1,6 +1,6 @@
 """Internal library for the gads CLI."""
 
-__version__ = "3.5.0"
+__version__ = "3.6.0"
 
 from .config import (
     PROJECT_ROOT,
@@ -50,7 +50,6 @@ from .gbp import (
 from .merchant import (
     mc_get_account,
     mc_get_account_status,
-    mc_get_datafeed_status,
     mc_get_return_policy,
     mc_get_shipping,
     mc_list_datafeeds,

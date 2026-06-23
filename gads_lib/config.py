@@ -61,7 +61,7 @@ SNAPSHOTS_DIR = Path(os.environ.get("GADS_SNAPSHOTS_DIR", SCOPE_ROOT / "snapshot
 DEV_TOKEN = os.environ.get("GOOGLE_ADS_DEVELOPER_TOKEN", "")
 LOGIN_CUSTOMER_ID = os.environ.get("GOOGLE_ADS_LOGIN_CUSTOMER_ID", "")
 CUSTOMER_ID = os.environ.get("GOOGLE_ADS_CUSTOMER_ID", "")
-API_VERSION = os.environ.get("GOOGLE_ADS_API_VERSION", "v19")
+API_VERSION = os.environ.get("GOOGLE_ADS_API_VERSION", "v24")
 
 # ── Google Merchant Center ───────────────────────────────────
 MERCHANT_CENTER_ID = os.environ.get("GOOGLE_MERCHANT_CENTER_ID", "")

@@ -161,81 +161,111 @@ def ads_upload_click_conversions(creds, conversions, conversion_action_id):
 
 def generate_keyword_ideas(creds, keywords=None, url=None, language_id="1000", geo_ids=None):
     """Generate keyword ideas.
-    
+
     POST to /customers/{CID}:generateKeywordIdeas
-    Supports keywordSeed, urlSeed, or both.
+    Supports keywordSeed, urlSeed, or keywordAndUrlSeed (when both given).
+    Seeds are mutually exclusive per the API contract.
     Sanitizes keywords before sending.
     """
     if not keywords and not url:
         click.secho("✗ Must provide either keywords or url", fg="red", err=True)
         raise SystemExit(1)
-    
+
     url_endpoint = (
         f"https://googleads.googleapis.com/{API_VERSION}"
         f"/customers/{CUSTOMER_ID}:generateKeywordIdeas"
     )
     headers = get_ads_headers(creds)
-    
+
     payload = {}
-    
-    if keywords:
-        # Sanitize keywords
+
+    # Seeds are mutually exclusive: use keywordAndUrlSeed when both are provided
+    if keywords and url:
+        sanitized = [sanitize_keyword(kw) for kw in keywords]
+        payload["keywordAndUrlSeed"] = {"url": url, "keywords": sanitized}
+    elif keywords:
         sanitized = [sanitize_keyword(kw) for kw in keywords]
         payload["keywordSeed"] = {"keywords": sanitized}
-    
-    if url:
+    else:
         payload["urlSeed"] = {"url": url}
-    
-    # Add language and geo targeting
-    payload["languageId"] = language_id
+
+    # Language: single resource-name string (not a numeric id field)
+    payload["language"] = f"languageConstants/{language_id}"
+    # Geo targets: array of plain resource-name strings (not objects)
     if geo_ids:
-        payload["geoTargetConstants"] = [{"resourceName": f"geoTargetConstants/{geo_id}"} for geo_id in geo_ids]
-    
+        payload["geoTargetConstants"] = [f"geoTargetConstants/{geo_id}" for geo_id in geo_ids]
+    # Network: restrict to Google Search (recommended; avoids schema rejection)
+    payload["keywordPlanNetwork"] = "GOOGLE_SEARCH"
+
     resp = requests.post(url_endpoint, headers=headers, json=payload)
     if resp.status_code != 200:
         detail = resp.text[:800]
         click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
         raise SystemExit(1)
-    
+
     return resp.json()
 
 
 def generate_keyword_forecast(creds, keywords, language_id="1000", geo_ids=None):
     """Generate keyword forecast metrics.
-    
-    POST to /customers/{CID}:generateKeywordForecastMetrics
-    Sanitizes keywords before sending.
+
+    POST to /customers/{CID}:generateKeywordForecastMetrics (v24 body schema).
+    v24: top-level key is ``campaign`` (not ``campaignToForecast``); keywords
+    move into ``campaign.adGroups[0].keywords`` as {text, matchType} objects;
+    ``keywordPlanNetwork`` is removed; ``biddingStrategy`` is required; and a
+    forward-looking ``forecastPeriod`` (start no earlier than tomorrow) with
+    ``YYYY-MM-DD`` dates is required. Sanitizes keywords before sending.
     """
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from .config import TZ_NAME
+
     url_endpoint = (
         f"https://googleads.googleapis.com/{API_VERSION}"
         f"/customers/{CUSTOMER_ID}:generateKeywordForecastMetrics"
     )
     headers = get_ads_headers(creds)
-    
+
     # Sanitize keywords
     sanitized_keywords = [sanitize_keyword(kw) for kw in keywords]
-    
+
+    # Forecast period must be in the future: tomorrow through +30 days.
+    _today = datetime.now(ZoneInfo(TZ_NAME)).date()
+    _start = _today + timedelta(days=1)
+    _end = _today + timedelta(days=31)
+
     payload = {
-        "campaignToForecast": {
-            "keywordPlanKeywords": [
-                {"keyword": kw} for kw in sanitized_keywords
-            ],
-            "keywordPlanNetwork": "GOOGLE_SEARCH",
+        "campaign": {
             "languageConstants": [f"languageConstants/{language_id}"],
-        }
+            "biddingStrategy": {
+                "manualCpcBiddingStrategy": {"maxCpcBidMicros": "1000000"}
+            },
+            "adGroups": [
+                {
+                    "keywords": [
+                        {"text": kw, "matchType": "BROAD"}
+                        for kw in sanitized_keywords
+                    ]
+                }
+            ],
+        },
+        "forecastPeriod": {
+            "startDate": _start.strftime("%Y-%m-%d"),
+            "endDate": _end.strftime("%Y-%m-%d"),
+        },
     }
-    
+
     if geo_ids:
-        payload["campaignToForecast"]["geoTargetConstants"] = [
+        payload["campaign"]["geoTargetConstants"] = [
             f"geoTargetConstants/{geo_id}" for geo_id in geo_ids
         ]
-    
+
     resp = requests.post(url_endpoint, headers=headers, json=payload)
     if resp.status_code != 200:
         detail = resp.text[:800]
         click.secho(f"✗ API Error {resp.status_code}: {detail}", fg="red", err=True)
         raise SystemExit(1)
-    
+
     return resp.json()
 
 

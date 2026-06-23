@@ -1491,9 +1491,10 @@ def merchant_status(as_json):
     enforce_allowed_caller()
     data = mc_get_account_status(get_credentials())
     if as_json: return print_json(data)
-    issues = data.get("accountLevelIssues", [])
+    issues = data.get("accountIssues", [])
     if not issues: return click.secho("  No issues.", fg="green")
-    rows = [{"id": i.get("id",""), "severity": i.get("severity",""), "title": i.get("title",""),
+    rows = [{"id": (i.get("name","").split("/")[-1] if i.get("name") else ""),
+             "severity": i.get("severity",""), "title": i.get("title",""),
              "detail": (i.get("detail","")[:80]+"…") if len(i.get("detail",""))>80 else i.get("detail","")}
             for i in issues]
     print_table(rows, ["id", "severity", "title", "detail"])
@@ -1505,13 +1506,26 @@ def merchant_products(limit, as_json):
     """List products."""
     enforce_allowed_caller()
     data = mc_list_products(get_credentials(), max_results=limit)
-    products = data.get("resources", [])
+    products = data.get("products", [])
     if as_json: return print_json(products)
-    rows = [{"id": p.get("id",""),
-             "title": (p.get("title","")[:50]+"…") if len(p.get("title",""))>50 else p.get("title",""),
-             "channel": p.get("channel",""), "availability": p.get("availability",""),
-             "price": f"{p.get('price',{}).get('value','')} {p.get('price',{}).get('currency','')}"} for p in products]
-    print_table(rows, ["id", "title", "channel", "availability", "price"])
+    def _price(attrs):
+        pr = attrs.get("price") or {}
+        micros = pr.get("amountMicros")
+        if micros in (None, ""):
+            return ""
+        try:
+            return f"{int(micros)/1_000_000:.2f} {pr.get('currencyCode','')}".strip()
+        except (TypeError, ValueError):
+            return f"{micros} {pr.get('currencyCode','')}".strip()
+    rows = []
+    for p in products:
+        attrs = p.get("productAttributes") or {}
+        title = attrs.get("title","")
+        rows.append({"id": p.get("offerId",""),
+                     "title": (title[:50]+"…") if len(title)>50 else title,
+                     "availability": attrs.get("availability",""),
+                     "price": _price(attrs)})
+    print_table(rows, ["id", "title", "availability", "price"])
 
 @merchant.command("product-status")
 @click.option("--limit", "-l", type=int, default=20)
@@ -1520,12 +1534,18 @@ def merchant_product_status(limit, as_json):
     """Product approval statuses."""
     enforce_allowed_caller()
     data = mc_list_product_statuses(get_credentials(), max_results=limit)
-    statuses = data.get("resources", [])
+    statuses = data.get("products", [])
     if as_json: return print_json(statuses)
-    rows = [{"product_id": s.get("productId",""),
-             "title": (s.get("title","")[:40]+"…") if len(s.get("title",""))>40 else s.get("title",""),
-             "destinations": ", ".join(f"{d.get('destination','')}: {d.get('status','')}" for d in s.get("destinationStatuses",[])[:3]),
-             "issues": len(s.get("itemLevelIssues",[]))} for s in statuses]
+    rows = []
+    for s in statuses:
+        attrs = s.get("productAttributes") or {}
+        status = s.get("productStatus") or {}
+        title = attrs.get("title","")
+        dests = status.get("destinationStatuses", [])
+        rows.append({"product_id": s.get("offerId",""),
+                     "title": (title[:40]+"…") if len(title)>40 else title,
+                     "destinations": ", ".join(d.get("reportingContext", d.get("destination","")) for d in dests[:3]),
+                     "issues": len(status.get("itemLevelIssues", []))})
     print_table(rows, ["product_id", "title", "destinations", "issues"])
 
 @merchant.command("feeds")
@@ -1534,11 +1554,18 @@ def merchant_feeds(as_json):
     """Data feeds."""
     enforce_allowed_caller()
     data = mc_list_datafeeds(get_credentials())
-    feeds = data.get("resources", [])
+    feeds = data.get("dataSources", [])
     if as_json: return print_json(feeds)
-    rows = [{"id": f.get("id",""), "name": f.get("name",""),
-             "content_type": f.get("contentType",""), "file_name": f.get("fileName") or ""} for f in feeds]
-    print_table(rows, ["id", "name", "content_type", "file_name"])
+    def _ds_type(f):
+        for k in ("primaryProductDataSource", "supplementalProductDataSource",
+                  "localInventoryDataSource", "regionalInventoryDataSource",
+                  "promotionDataSource", "merchantReviewDataSource", "productReviewDataSource"):
+            if k in f:
+                return k
+        return f.get("input", "")
+    rows = [{"id": f.get("dataSourceId",""), "name": f.get("displayName",""),
+             "type": _ds_type(f), "file_name": (f.get("fileInput") or {}).get("fileName","")} for f in feeds]
+    print_table(rows, ["id", "name", "type", "file_name"])
 
 @merchant.command("shipping")
 @click.option("--json", "as_json", is_flag=True)
@@ -1547,8 +1574,9 @@ def merchant_shipping(as_json):
     enforce_allowed_caller()
     data = mc_get_shipping(get_credentials())
     if as_json: return print_json(data)
-    rows = [{"name": s.get("name",""), "country": s.get("deliveryCountry",""),
-             "currency": s.get("currency",""), "active": s.get("active","")} for s in data.get("services",[])]
+    rows = [{"name": s.get("serviceName",""),
+             "country": ", ".join(s.get("deliveryCountries", [])),
+             "currency": s.get("currencyCode",""), "active": s.get("active","")} for s in data.get("services",[])]
     print_table(rows, ["name", "country", "currency", "active"])
 
 @merchant.command("returns")
@@ -1558,9 +1586,11 @@ def merchant_returns(as_json):
     enforce_allowed_caller()
     data = mc_get_return_policy(get_credentials())
     if as_json: return print_json(data)
-    policies = data.get("resources", data.get("returnPolicies", [data] if "name" in data else []))
-    rows = [{"name": p.get("name",""), "country": p.get("country",""),
-             "label": p.get("label",""), "days": (p.get("policy") or {}).get("numberOfDays","")} for p in policies]
+    policies = data.get("onlineReturnPolicies", [])
+    rows = [{"name": (p.get("name","").split("/")[-1] if p.get("name") else ""),
+             "country": ", ".join(p.get("countries", [])),
+             "label": p.get("label",""),
+             "days": (p.get("policy") or {}).get("days", (p.get("policy") or {}).get("numberOfDays",""))} for p in policies]
     print_table(rows, ["name", "country", "label", "days"])
 
 # ── GA4 commands ─────────────────────────────────────────────
@@ -2181,17 +2211,53 @@ def keyword_search_terms(days, campaign_id, min_clicks, as_json):
                      "cpa": round(cost/conv,2) if conv>0 else "—"})
     print_table(rows, ["search_term", "campaign", "impr", "clicks", "conv", "cost", "cpa"])
 
+# ISO code → Google Ads language_constant ID
+# Verified live via: SELECT language_constant.id, language_constant.code FROM language_constant WHERE language_constant.code IN ('en','ar')
+_LANGUAGE_IDS = {"en": "1000", "ar": "1019"}
+
+# ISO country code → geo_target_constant ID (country-level only)
+# Verified live via: SELECT geo_target_constant.id, geo_target_constant.country_code FROM geo_target_constant WHERE geo_target_constant.country_code = 'AE' AND geo_target_constant.target_type = 'Country'
+_GEO_IDS = {"AE": "2784"}
+
+
+def _resolve_language(value):
+    """Accept an ISO code (e.g. 'en') or a raw numeric language_constant ID."""
+    if value is None:
+        return value
+    v = str(value).strip()
+    if v.isdigit():
+        return v
+    resolved = _LANGUAGE_IDS.get(v.lower())
+    if resolved:
+        return resolved
+    return v  # pass through; API will return a clear error if unknown
+
+
+def _resolve_geo(value):
+    """Accept an ISO country code (e.g. 'AE') or a raw numeric geo_target_constant ID."""
+    if value is None:
+        return value
+    v = str(value).strip()
+    if v.isdigit():
+        return v
+    resolved = _GEO_IDS.get(v.upper())
+    if resolved:
+        return resolved
+    return v  # pass through; API will return a clear error if unknown
+
+
 @keyword.command("ideas")
 @click.option("--keywords", "-k", default=None, help="Comma-separated seed keywords.")
 @click.option("--url", "-u", default=None, help="Seed URL for ideas.")
-@click.option("--language", default="1000", help="Language ID (default: 1000=English).")
-@click.option("--geo", default=None, help="Comma-separated geo target IDs (e.g. 2784=UAE).")
+@click.option("--language", default="1000", help="ISO code (e.g. 'en', 'ar') or numeric language_constant ID (default: 1000=English).")
+@click.option("--geo", default=None, help="Comma-separated ISO country codes (e.g. 'AE') or numeric geo_target_constant IDs (e.g. 2784=UAE).")
 @click.option("--json", "as_json", is_flag=True)
 def keyword_ideas_cmd(keywords, url, language, geo, as_json):
     """Generate keyword ideas (requires Standard Access dev token)."""
     kw_list = [k.strip() for k in keywords.split(",")] if keywords else None
-    geo_list = [g.strip() for g in geo.split(",")] if geo else None
-    result = generate_keyword_ideas(get_credentials(), keywords=kw_list, url=url, language_id=language, geo_ids=geo_list)
+    resolved_language = _resolve_language(language)
+    geo_list = [_resolve_geo(g.strip()) for g in geo.split(",")] if geo else None
+    result = generate_keyword_ideas(get_credentials(), keywords=kw_list, url=url, language_id=resolved_language, geo_ids=geo_list)
     if as_json:
         return print_json(result)
     ideas = result.get("results", [])
@@ -2208,14 +2274,15 @@ def keyword_ideas_cmd(keywords, url, language, geo, as_json):
 
 @keyword.command("forecast")
 @click.option("--keywords", "-k", required=True, help="Comma-separated keywords.")
-@click.option("--language", default="1000")
-@click.option("--geo", default=None, help="Comma-separated geo target IDs.")
+@click.option("--language", default="1000", help="ISO code (e.g. 'en', 'ar') or numeric language_constant ID (default: 1000=English).")
+@click.option("--geo", default=None, help="Comma-separated ISO country codes (e.g. 'AE') or numeric geo_target_constant IDs (e.g. 2784=UAE).")
 @click.option("--json", "as_json", is_flag=True)
 def keyword_forecast_cmd(keywords, language, geo, as_json):
     """Keyword traffic/cost forecast (requires Standard Access dev token)."""
     kw_list = [k.strip() for k in keywords.split(",")]
-    geo_list = [g.strip() for g in geo.split(",")] if geo else None
-    result = generate_keyword_forecast(get_credentials(), keywords=kw_list, language_id=language, geo_ids=geo_list)
+    resolved_language = _resolve_language(language)
+    geo_list = [_resolve_geo(g.strip()) for g in geo.split(",")] if geo else None
+    result = generate_keyword_forecast(get_credentials(), keywords=kw_list, language_id=resolved_language, geo_ids=geo_list)
     if as_json:
         return print_json(result)
     print_json(result)

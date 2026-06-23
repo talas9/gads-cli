@@ -108,7 +108,7 @@ GOOGLE_GA4_PROPERTY_ID=271773771                 # GA4 property ID
 # Optional configuration
 GADS_TIMEZONE=Asia/Dubai                         # Default: UTC
 GADS_CURRENCY=AED                                # Default: USD
-GADS_API_VERSION=v19                             # Default: v19
+GADS_API_VERSION=v24                             # Default: v24
 
 # Paths (auto-detected by default)
 GADS_CREDENTIALS_PATH=credentials/google-ads-oauth.json
@@ -181,6 +181,26 @@ Each endpoint must use its correct base URL or requests fail.
 - Requires `webmasters.readonly` OAuth scope (added in v3.3.0)
 - Data lags ~3 days (GSC default processing delay)
 - Site URL must match verified property exactly (URL-prefix or domain property)
+
+### Merchant Center (Merchant API v1)
+
+- Uses **Merchant API v1** (`merchantapi.googleapis.com`), the successor to the
+  Content API for Shopping v2.1 (which sunsets **2026-08-18**). OAuth scope is
+  unchanged: `https://www.googleapis.com/auth/content`.
+- **No single base URL** — each sub-API has its own version segment before the
+  resource name: `accounts/v1` (account, issues, shippingSettings,
+  onlineReturnPolicies), `products/v1` (products), `datasources/v1` (dataSources).
+  Account ID embeds as `accounts/{ID}`.
+- **`merchantapi.googleapis.com` must be enabled** on the GCP project behind the
+  OAuth client (Cloud Console → APIs & Services → Enable APIs). If it isn't, every
+  merchant command returns `403 SERVICE_DISABLED` even though credentials are valid.
+- **Response-shape differences vs v2.1** (`--json` consumers): products array is
+  `products` (not `resources`); price is `productAttributes.price.{amountMicros,
+  currencyCode}` in micros (÷ 1e6); product id is `offerId`; product statuses are
+  folded into the products resource under `productStatus`; data sources array is
+  `dataSources` (`displayName`, `fileInput.fileName`); account issues array is
+  `accountIssues`; shipping services use `serviceName`/`deliveryCountries[]`;
+  return policies array is `onlineReturnPolicies`.
 
 ### Database
 

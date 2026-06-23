@@ -268,7 +268,7 @@ All configuration via environment variables or `.env` file. See [`.env.example`]
 | `GOOGLE_GA4_PROPERTY_ID` | GA4 commands | Property ID (digits only) |
 | `GADS_TIMEZONE` | Optional (default: `UTC`) | IANA timezone (e.g. `America/New_York`) |
 | `GADS_CURRENCY` | Optional (default: `USD`) | ISO 4217 code (e.g. `AED`, `EUR`) |
-| `GOOGLE_ADS_API_VERSION` | Optional (default: `v19`) | API version |
+| `GOOGLE_ADS_API_VERSION` | Optional (default: `v24`) | API version |
 
 > **GBP, GSC, Merchant Center, and GA4 commands do NOT need a developer token** — only OAuth credentials.
 

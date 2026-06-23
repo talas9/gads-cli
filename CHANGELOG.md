@@ -2,6 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.6.0] - 2026-06-23
+
+### Changed
+- **Google Ads API default bumped `v19` → `v24`** (`gads_lib/config.py`). v19 was
+  sunset 2026-02-11; v24 is the current GA version. GAQL `searchStream`/`search`,
+  `mutate`, `uploadClickConversions`, and `generateKeywordIdeas` endpoints are
+  unchanged across v23→v24 — version-string-only. Docs (`CLAUDE.md`, `README.md`,
+  `.env.example`) updated to state v24.
+- **Keyword forecast rebuilt for v24** (`gads_lib/ads.py` `generate_keyword_forecast`).
+  v24 reshaped `generateKeywordForecastMetrics`: top-level key is now `campaign`
+  (was `campaignToForecast`), keywords moved into `campaign.adGroups[].keywords[]`
+  as `{text, matchType}`, `keywordPlanNetwork` removed, `biddingStrategy`
+  (manual CPC) is now required, and a forward-looking `forecastPeriod`
+  (`startDate`/`endDate`, `YYYY-MM-DD`) is required. The old body returned HTTP 400.
+
+### Fixed
+- **`keyword ideas` request payload** (`gads_lib/ads.py` `generate_keyword_ideas`) —
+  corrected to the documented `generateKeywordIdeas` REST schema: `language` is a
+  single `languageConstants/{id}` string (was the invalid `languageId`),
+  `geoTargetConstants` is an array of plain resource-name strings (was objects),
+  `keywordPlanNetwork` is now sent, and both-seed requests use `keywordAndUrlSeed`.
+  The command previously returned HTTP 400 for all inputs; now returns ideas.
+- **`keyword ideas` / `keyword forecast` accept ISO codes** for `--language`
+  (`en`, `ar`) and `--geo` (`AE`) in addition to numeric constant IDs, resolved
+  to verified `languageConstants`/`geoTargetConstants` IDs (`gads_lib/cli.py`).
+
+### Changed (breaking — Merchant `--json` shape)
+- **Merchant Center migrated from Content API for Shopping v2.1 to Merchant API v1**
+  (`gads_lib/merchant.py`, host `merchantapi.googleapis.com`). Content API v2.1
+  sunsets 2026-08-18. OAuth scope is unchanged (`.../auth/content`). The
+  `gads merchant ...` command names and human-readable table columns are preserved,
+  but `--json` now returns Merchant API v1 objects, so machine consumers must adapt:
+  - `products`: array `resources` → `products`; price `{value,currency}` →
+    `productAttributes.price.{amountMicros,currencyCode}` (micros); product id →
+    `offerId`; title/availability now under `productAttributes`; `channel` removed.
+  - `product-status`: no standalone endpoint in v1 — folded into the products
+    resource; statuses read from each product's `productStatus`.
+  - `status`: array `accountLevelIssues` → `accountIssues`.
+  - `feeds` (data sources): array `resources` → `dataSources`; `name` →
+    `displayName`; `fileName` → `fileInput.fileName`; `contentType` → type union.
+  - `shipping`: service `name` → `serviceName`; `deliveryCountry` →
+    `deliveryCountries[]`; `currency` → `currencyCode`.
+  - `returns`: array → `onlineReturnPolicies`.
+  All merchant commands remain read-only (GET).
+
+### Security
+- **Dependency floors raised** (`pyproject.toml`): `requests>=2.33.0` (closes
+  CVE-2024-47081 netrc leak and CVE-2026-25645 temp-file reuse),
+  `python-dotenv>=1.2.2` (closes CVE-2026-28684 symlink overwrite),
+  `click>=8.1`, `google-auth>=2.35`, `google-auth-oauthlib>=1.2`; dev `pytest>=9.0`,
+  `pytest-cov>=6.0` (held below 7.0 which dropped built-in subprocess coverage).
+
+### Notes
+- GA4 (Data API v1beta), GBP (Account/Business Info/Performance v1), and GSC
+  (webmasters/v3) confirmed current — unchanged. Monitor items: GA4 Admin and
+  GBP Reviews still require legacy surfaces (My Business v4 for reviews).
+
 ## [3.5.0] - 2026-06-23
 
 ### Added

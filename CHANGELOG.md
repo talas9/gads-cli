@@ -2,6 +2,62 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.0] - 2026-06-23
+
+### Added
+- **GA4 Data API — `batchRunReports`** (`gads ga4 batch-report`): Run up to 5 GA4 reports in a
+  single API call, reducing quota overhead. Accepts a `--requests-file` JSON path or uses a
+  sensible default (sessions by source + key events by date). Live-verified against property
+  271773771.
+- **GA4 Data API — `runPivotReport`** (`gads ga4 pivot-report`): Cross-tabulation reports with
+  a configurable pivot dimension. Useful for campaign × device or source × medium breakdowns.
+- **GA4 Data API — `checkCompatibility`** (`gads ga4 check-compatibility`): Pre-validate which
+  dimension+metric combinations are compatible before running a report. Returns 378 dimension
+  and 107 metric compatibility entries for the Talas property. Live-verified.
+- **GSC — pagination via `startRow`** (`gads gsc queries/pages/performance`): All
+  `gsc_search_analytics` calls now support `start_row` offset pagination so queries returning
+  exactly `rowLimit` rows are no longer silently truncated.
+- **GSC — `dataState` exposure**: All Search Console analytics commands now support `--data-state`
+  (`final` / `all` / `hourly_all`) to opt into fresher unconfirmed data.
+- **GSC — server-side `dimensionFilterGroups`**: `gsc_search_analytics` now accepts
+  `dimension_filter_groups` parameter for server-side filtering before aggregation, avoiding
+  rowLimit truncation of large datasets.
+- **GSC — URL Inspection API** (`gads gsc inspect URL -s SITE`): Inspect any URL's Google index
+  status, indexing state, page fetch state, mobile usability, and last crawl time via the URL
+  Inspection API (`searchconsole.googleapis.com/v1`). Read-only. Verified via `--help`; live
+  verification pending token regeneration with `webmasters.readonly` scope (see note below).
+- **GSC — sitemaps list** (`gads gsc sitemaps -s SITE`): List all submitted sitemaps for a
+  Search Console property. Verified via `--help`; live verification pending token regen.
+- **GBP — batch-get reviews** (`gads gbp batch-reviews LOCATION_NAME...`): Fetch reviews from
+  multiple GBP locations in one command, returning a dict keyed by location name.
+- **GBP — local posts list** (`gads gbp local-posts --account A --location L`): List all local
+  posts for a GBP location using the legacy v4 API.
+- **GBP — local posts create/delete** (`gads gbp create-post` / `gads gbp delete-post`): CRUD
+  for GBP local posts. Both commands are WRITE operations — added and verified via `--help` /
+  `--dry-run`; NOT live-mutation-verified to avoid mutating the live account.
+- **KB drift check** (`gads kb check`): Compares API versions hard-coded in each service module
+  against `kb/manifest.json`. Exits non-zero on drift — CI-able. Detected real drift on first
+  run: GA4 Admin API uses `v1alpha` in code but `v1beta` is the stable KB-documented version
+  (flagged for future migration). `gads kb list` surfaces all KB files with sizes. `gads kb show
+  <slug>` prints the full KB doc for any API.
+- **KB directory committed**: `gads-cli/kb/` (5 files: google-ads.md, ga4.md, gbp.md,
+  search-console.md, merchant-api.md, INDEX.md, manifest.json) is now git-tracked as a shipping
+  deliverable.
+
+### Fixed
+- **GSC `gsc_search_analytics`**: Added `startRow` and `dataState` fields to the request body
+  (previously omitted, causing silent truncation at `rowLimit` and no way to request fresh data).
+
+### Notes
+- **GSC live verification pending**: All GSC commands require the `webmasters.readonly` OAuth
+  scope. The current token was generated before this scope was added. Re-run `gads auth login
+  --force` to regenerate the token and enable live GSC verification.
+- **Merchant skipped**: Merchant Center gaps deferred — the `merchantapi.googleapis.com` API is
+  not enabled on the GCP project yet. No Merchant changes in this release.
+- **GA4 Admin `v1alpha` known drift**: The KB drift check flags GA4 Admin API as DRIFT
+  (`v1alpha` in code vs `v1beta` in manifest). Key events still work on `v1alpha`; migrating to
+  `v1beta` is a separate task.
+
 ## [3.6.0] - 2026-06-23
 
 ### Changed

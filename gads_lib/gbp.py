@@ -206,3 +206,82 @@ def gbp_search_keywords_monthly(creds, location_name, start_month, end_month, pa
         params["pageToken"] = token
 
     return sorted(all_keywords, key=lambda x: -x["impressions"])
+
+
+# ── Reviews batch helper ─────────────────────────────────────
+
+def gbp_batch_get_reviews(creds, account_name, location_names, page_size=50):
+    """Collect reviews for multiple locations.
+
+    GBP v4 has no true batch-reviews endpoint, so this iterates over each
+    location and calls gbp_list_reviews, returning a dict keyed by location
+    resource name.
+
+    Args:
+        creds: OAuth credentials.
+        account_name: e.g. "accounts/123456789" (unused by gbp_list_reviews
+            directly, kept for API symmetry / future use).
+        location_names: list of location resource names like
+            "accounts/X/locations/Y".
+        page_size: passed through to gbp_list_reviews for each location.
+
+    Returns:
+        {location_name: [review, ...]}
+    """
+    results = {}
+    for location_name in location_names:
+        resp = gbp_list_reviews(creds, location_name, page_size=page_size)
+        results[location_name] = resp.get("reviews", [])
+    return results
+
+
+# ── Local Posts CRUD ─────────────────────────────────────────
+
+def gbp_list_local_posts(creds, account_name, location_id, page_size=20):
+    """List local posts for a location.
+
+    GET /v4/{parent=accounts/X/locations/Y}/localPosts
+
+    Returns raw API response.
+    """
+    parent = f"{account_name}/locations/{location_id}"
+    return request_json(
+        "GET",
+        f"{GBP_V4_BASE}/{parent}/localPosts",
+        headers=get_bearer_headers(creds),
+        params={"pageSize": page_size},
+    )
+
+
+def gbp_create_local_post(creds, account_name, location_id, post_body):
+    """Create a local post for a location.
+
+    POST /v4/{parent=accounts/X/locations/Y}/localPosts
+
+    Args:
+        post_body: LocalPost resource dict (caller provides full body).
+
+    Returns raw API response.
+    """
+    parent = f"{account_name}/locations/{location_id}"
+    return request_json(
+        "POST",
+        f"{GBP_V4_BASE}/{parent}/localPosts",
+        headers=get_bearer_headers(creds),
+        json_body=post_body,
+    )
+
+
+def gbp_delete_local_post(creds, account_name, location_id, post_id):
+    """Delete a local post.
+
+    DELETE /v4/accounts/{X}/locations/{Y}/localPosts/{postId}
+
+    Returns raw API response.
+    """
+    parent = f"{account_name}/locations/{location_id}"
+    return request_json(
+        "DELETE",
+        f"{GBP_V4_BASE}/{parent}/localPosts/{post_id}",
+        headers=get_bearer_headers(creds),
+    )

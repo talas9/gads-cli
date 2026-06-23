@@ -1,6 +1,6 @@
 """Internal library for the gads CLI."""
 
-__version__ = "3.6.0"
+__version__ = "3.7.0"
 
 from .config import (
     PROJECT_ROOT,
@@ -45,6 +45,10 @@ from .gbp import (
     gbp_daily_metrics,
     gbp_multi_daily_metrics,
     gbp_search_keywords_monthly,
+    gbp_batch_get_reviews,
+    gbp_list_local_posts,
+    gbp_create_local_post,
+    gbp_delete_local_post,
     DAILY_METRICS,
 )
 from .merchant import (
@@ -60,6 +64,9 @@ from .ga4 import (
     ga4_get_metadata,
     ga4_run_realtime_report,
     ga4_run_report,
+    ga4_batch_run_reports,
+    ga4_run_pivot_report,
+    ga4_check_compatibility,
     list_key_events,
     create_key_event,
     delete_key_event,

@@ -176,3 +176,112 @@ def delete_key_event(property_id, creds, event_name):
         return True
     _raise_for_admin_status(resp, f"deleting keyEvent {event_name!r}")
     return True  # unreachable — _raise_for_admin_status exits on any >=400
+
+
+# ── Data API: Batch / Pivot / Compatibility ──────────────────────────────────
+#
+# These three endpoints extend the core runReport surface:
+#   batchRunReports  — run up to 5 reports in a single round-trip
+#   runPivotReport   — cross-tab / pivot report
+#   checkCompatibility — discover which dimensions/metrics can be combined
+#
+# API: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
+
+
+def ga4_batch_run_reports(creds, requests_list, property_id=None):
+    """Run multiple GA4 reports in a single API call.
+
+    POST /v1beta/properties/{pid}:batchRunReports
+
+    Args:
+        creds: OAuth credentials object.
+        requests_list: list of report request dicts.  Each dict has the same
+            shape as the body accepted by ga4_run_report (dimensions, metrics,
+            dateRanges, limit, offset, …).  Up to 5 requests per batch.
+        property_id: GA4 numeric property id.  Falls back to
+            GOOGLE_GA4_PROPERTY_ID env var if omitted.
+
+    Returns:
+        Raw API response dict containing a ``reports`` list where each element
+        corresponds to the matching entry in ``requests_list``.
+    """
+    pid = property_id or _require_property()
+    body = {"requests": requests_list}
+    return request_json(
+        "POST",
+        f"{GA4_DATA_BASE}/properties/{pid}:batchRunReports",
+        headers=get_bearer_headers(creds),
+        json_body=body,
+    )
+
+
+def ga4_run_pivot_report(creds, dimensions, metrics, date_ranges, pivots, property_id=None):
+    """Run a GA4 pivot report.
+
+    POST /v1beta/properties/{pid}:runPivotReport
+
+    Args:
+        creds: OAuth credentials object.
+        dimensions: list of dimension name strings, e.g. ["date", "country"].
+        metrics: list of metric name strings, e.g. ["sessions", "activeUsers"].
+        date_ranges: list of dateRange dicts, e.g.
+            [{"startDate": "7daysAgo", "endDate": "yesterday"}].
+        pivots: list of pivot objects.  Each pivot dict may contain:
+            fieldNames (list[str]), limit (int), offset (int),
+            orderBys (list), metricAggregations (list[str]).
+        property_id: GA4 numeric property id.  Falls back to
+            GOOGLE_GA4_PROPERTY_ID env var if omitted.
+
+    Returns:
+        Raw API response dict with ``pivotHeaders``, ``rows``, ``aggregates``,
+        ``metadata``, and ``kind`` fields.
+    """
+    pid = property_id or _require_property()
+    body = {
+        "dimensions": [{"name": d} for d in dimensions],
+        "metrics": [{"name": m} for m in metrics],
+        "dateRanges": date_ranges,
+        "pivots": pivots,
+    }
+    return request_json(
+        "POST",
+        f"{GA4_DATA_BASE}/properties/{pid}:runPivotReport",
+        headers=get_bearer_headers(creds),
+        json_body=body,
+    )
+
+
+def ga4_check_compatibility(creds, dimensions, metrics, property_id=None):
+    """Check which dimensions and metrics are compatible with each other.
+
+    POST /v1beta/properties/{pid}:checkCompatibility
+
+    Useful for discovering valid dimension/metric combinations before running a
+    report — the API returns a compatibility enum for every field so you can
+    filter to COMPATIBLE ones only.
+
+    Args:
+        creds: OAuth credentials object.
+        dimensions: list of dimension name strings to check.
+        metrics: list of metric name strings to check.
+        property_id: GA4 numeric property id.  Falls back to
+            GOOGLE_GA4_PROPERTY_ID env var if omitted.
+
+    Returns:
+        Raw API response dict containing:
+        - ``dimensionCompatibilities``: list of {dimensionMetadata, compatibility}
+        - ``metricCompatibilities``:   list of {metricMetadata, compatibility}
+        where ``compatibility`` is one of "COMPATIBLE", "INCOMPATIBLE",
+        or "COMPATIBILITY_UNSPECIFIED".
+    """
+    pid = property_id or _require_property()
+    body = {
+        "dimensions": [{"name": d} for d in dimensions],
+        "metrics": [{"name": m} for m in metrics],
+    }
+    return request_json(
+        "POST",
+        f"{GA4_DATA_BASE}/properties/{pid}:checkCompatibility",
+        headers=get_bearer_headers(creds),
+        json_body=body,
+    )

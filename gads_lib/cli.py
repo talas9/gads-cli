@@ -38,6 +38,9 @@ from gads_lib import (
     ga4_get_metadata,
     ga4_run_realtime_report,
     ga4_run_report,
+    ga4_batch_run_reports,
+    ga4_run_pivot_report,
+    ga4_check_compatibility,
     list_key_events,
     create_key_event,
     delete_key_event,
@@ -51,6 +54,10 @@ from gads_lib import (
     gbp_daily_metrics,
     gbp_multi_daily_metrics,
     gbp_search_keywords_monthly,
+    gbp_batch_get_reviews,
+    gbp_list_local_posts,
+    gbp_create_local_post,
+    gbp_delete_local_post,
     DAILY_METRICS,
     generate_keyword_ideas,
     generate_keyword_forecast,
@@ -72,7 +79,8 @@ from gads_lib import (
 
 
 from gads_lib import __version__
-from gads_lib.gsc import gsc_list_sites, gsc_search_analytics
+from gads_lib.gsc import gsc_list_sites, gsc_search_analytics, gsc_list_sitemaps, gsc_url_inspect
+from gads_lib.kb import check_drift, list_kb_files, show_kb_file, load_manifest
 from gads_lib.output import EXIT_CODES, print_error
 from gads_lib.catalog import build_catalog
 from gads_lib import dbread
@@ -1070,6 +1078,90 @@ def gbp_reviews(location_name, as_json):
              "updated": r.get("updateTime","")} for r in reviews]
     print_table(rows, ["name", "reviewer", "stars", "comment", "reply", "updated"])
 
+
+@gbp.command("batch-reviews")
+@click.argument("location_names", nargs=-1, required=True)
+@click.option("--account", "account_name", default="", help="Account name (optional, for context).")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_batch_reviews_cmd(location_names, account_name, as_json):
+    """Fetch reviews from multiple locations at once."""
+    enforce_allowed_caller()
+    data = gbp_batch_get_reviews(get_credentials(), account_name, list(location_names))
+    if as_json:
+        return print_json(data)
+    for loc, reviews in data.items():
+        click.secho(f"\n  {loc} ({len(reviews)} review(s))", bold=True)
+        rows = [{"reviewer": ((r.get("reviewer") or {}).get("displayName")) or "",
+                 "stars": r.get("starRating", ""),
+                 "comment": (r.get("comment", "")[:60] + "…") if len(r.get("comment", "")) > 60 else r.get("comment", ""),
+                 "updated": r.get("updateTime", "")} for r in reviews]
+        if rows:
+            print_table(rows, ["reviewer", "stars", "comment", "updated"])
+
+
+@gbp.command("local-posts")
+@click.option("--account", "account_name", required=True, help="Account resource name (accounts/ID).")
+@click.option("--location", "location_id", required=True, help="Location ID (numeric).")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_local_posts_cmd(account_name, location_id, as_json):
+    """List local posts for a GBP location."""
+    enforce_allowed_caller()
+    data = gbp_list_local_posts(get_credentials(), account_name, location_id)
+    posts = data.get("localPosts", [])
+    if as_json:
+        return print_json(posts)
+    rows = [{"name": p.get("name", "").split("/")[-1],
+             "state": p.get("state", ""),
+             "topic_type": p.get("topicType", ""),
+             "summary": (p.get("summary", "")[:60] + "…") if len(p.get("summary", "")) > 60 else p.get("summary", ""),
+             "created": p.get("createTime", "")} for p in posts]
+    print_table(rows, ["name", "state", "topic_type", "summary", "created"])
+
+
+@gbp.command("create-post")
+@click.option("--account", "account_name", required=True, help="Account resource name (accounts/ID).")
+@click.option("--location", "location_id", required=True, help="Location ID (numeric).")
+@click.option("--summary", required=True, help="Post text (required).")
+@click.option("--topic-type", default="STANDARD", help="Post type: STANDARD, EVENT, OFFER, ALERT.")
+@click.option("--call-to-action-url", "cta_url", default=None, help="URL for the CTA button.")
+@click.option("--call-to-action-type", "cta_type", default=None, help="CTA type: LEARN_MORE, BOOK, ORDER, BUY, SIGN_UP, CALL.")
+@click.option("--dry-run", is_flag=True, help="Show what would be sent without creating.")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_create_post_cmd(account_name, location_id, summary, topic_type, cta_url, cta_type, dry_run, as_json):
+    """Create a local post for a GBP location. [WRITE — not live-mutation-verified]"""
+    enforce_allowed_caller()
+    body = {"summary": summary, "topicType": topic_type.upper()}
+    if cta_url and cta_type:
+        body["callToAction"] = {"actionType": cta_type.upper(), "url": cta_url}
+    if dry_run:
+        if as_json:
+            return print_json({"dry_run": True, "body": body})
+        click.secho(f"  DRY RUN: would POST to accounts/{account_name}/locations/{location_id}/localPosts", fg="yellow")
+        click.echo(f"  Body: {body}")
+        return
+    data = gbp_create_local_post(get_credentials(), account_name, location_id, body)
+    if as_json:
+        return print_json(data)
+    click.secho(f"  Created post: {data.get('name', '')}", fg="green")
+
+
+@gbp.command("delete-post")
+@click.option("--account", "account_name", required=True, help="Account resource name (accounts/ID).")
+@click.option("--location", "location_id", required=True, help="Location ID (numeric).")
+@click.argument("post_id")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation.")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_delete_post_cmd(account_name, location_id, post_id, yes, as_json):
+    """Delete a local post. [WRITE — not live-mutation-verified]"""
+    enforce_allowed_caller()
+    if not yes:
+        click.confirm(f"  Delete local post {post_id}?", abort=True)
+    data = gbp_delete_local_post(get_credentials(), account_name, location_id, post_id)
+    if as_json:
+        return print_json(data or {"deleted": True, "post_id": post_id})
+    click.secho(f"  Deleted post {post_id}", fg="green")
+
+
 @gbp.command("reply-review")
 @click.argument("review_name")
 @click.argument("comment")
@@ -1472,6 +1564,52 @@ def gsc_perf_cmd(site, days, as_json):
     print_table(rows, ["date", "clicks", "impressions", "ctr", "position"])
 
 
+@gsc.command("sitemaps")
+@click.option("-s", "--site", required=True, help="Site URL (e.g. https://shop.talas.ae/).")
+@click.option("--json", "as_json", is_flag=True)
+def gsc_sitemaps_cmd(site, as_json):
+    """List submitted sitemaps for a Search Console property."""
+    enforce_allowed_caller()
+    data = gsc_list_sitemaps(get_credentials(), site)
+    sitemaps = data.get("sitemap", [])
+    if as_json:
+        return print_json(sitemaps)
+    rows = [{"path": s.get("path", ""), "last_submitted": s.get("lastSubmitted", ""),
+             "type": s.get("type", ""), "is_index": s.get("isSitemapIndex", False),
+             "warnings": s.get("warnings", "0"), "errors": s.get("errors", "0")} for s in sitemaps]
+    print_table(rows, ["path", "last_submitted", "type", "is_index", "warnings", "errors"])
+
+
+@gsc.command("inspect")
+@click.argument("url")
+@click.option("-s", "--site", required=True, help="Verified Search Console property URL.")
+@click.option("--lang", default="en-US", help="Language code (default en-US).")
+@click.option("--json", "as_json", is_flag=True)
+def gsc_inspect_cmd(url, site, lang, as_json):
+    """Inspect a URL's index status via Search Console URL Inspection API."""
+    enforce_allowed_caller()
+    data = gsc_url_inspect(get_credentials(), url, site, language_code=lang)
+    if as_json:
+        return print_json(data)
+    result = data.get("inspectionResult", {})
+    index = result.get("indexStatusResult", {})
+    click.secho(f"\n  URL Inspection: {url}\n", bold=True)
+    fields = [
+        ("verdict", index.get("verdict", "")),
+        ("coverage_state", index.get("coverageState", "")),
+        ("indexing_state", index.get("indexingState", "")),
+        ("page_fetch_state", index.get("pageFetchState", "")),
+        ("robots_txt_state", index.get("robotsTxtState", "")),
+        ("last_crawl", index.get("lastCrawlTime", "")),
+        ("crawled_as", index.get("crawledAs", "")),
+        ("canonical_google", index.get("googleCanonical", "")),
+        ("canonical_user", index.get("userCanonical", "")),
+        ("mobile_usability", (result.get("mobileUsabilityResult") or {}).get("verdict", "")),
+    ]
+    rows = [{"field": k, "value": v} for k, v in fields if v]
+    print_table(rows, ["field", "value"])
+
+
 # ── Merchant commands ────────────────────────────────────────
 
 @merchant.command("account")
@@ -1656,6 +1794,98 @@ def ga4_realtime_cmd(property_id, dimensions, metrics, as_json):
         rows.append(r)
     print_table(rows, dim_h + met_h)
     click.echo(f"\n  {len(rows)} row(s)")
+
+
+@ga4.command("batch-report")
+@click.option("--property", "property_id", default=None)
+@click.option("--requests-file", "requests_file", default=None, help="JSON file with list of report requests.")
+@click.option("--json", "as_json", is_flag=True)
+def ga4_batch_report_cmd(property_id, requests_file, as_json):
+    """Run multiple GA4 reports in one API call (batchRunReports)."""
+    enforce_allowed_caller()
+    import json as _json
+    if requests_file:
+        with open(requests_file) as f:
+            requests_list = _json.load(f)
+    else:
+        # Default: two reports — sessions by source, and events by date
+        requests_list = [
+            {"dimensions": [{"name": "sessionSource"}], "metrics": [{"name": "sessions"}],
+             "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}], "limit": 10},
+            {"dimensions": [{"name": "date"}], "metrics": [{"name": "keyEvents"}],
+             "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}], "limit": 30},
+        ]
+    data = ga4_batch_run_reports(get_credentials(), requests_list, property_id=property_id)
+    if as_json:
+        return print_json(data)
+    reports = data.get("reports", [])
+    for i, report in enumerate(reports):
+        click.secho(f"\n  Report {i+1}:", fg="white", bold=True)
+        dim_h = [h.get("name", "") for h in report.get("dimensionHeaders", [])]
+        met_h = [h.get("name", "") for h in report.get("metricHeaders", [])]
+        rows = []
+        for row in report.get("rows", []):
+            r = {dim_h[j]: dv.get("value", "") for j, dv in enumerate(row.get("dimensionValues", []))}
+            r.update({met_h[j]: mv.get("value", "") for j, mv in enumerate(row.get("metricValues", []))})
+            rows.append(r)
+        print_table(rows, dim_h + met_h)
+        click.echo(f"  {len(rows)} row(s)")
+
+
+@ga4.command("pivot-report")
+@click.option("--property", "property_id", default=None)
+@click.option("--dimensions", "-d", default="sessionSource,deviceCategory")
+@click.option("--metrics", "-m", default="sessions")
+@click.option("--start", "start_date", default="7daysAgo")
+@click.option("--end", "end_date", default="yesterday")
+@click.option("--pivot-dimension", "pivot_dim", default="deviceCategory", help="Dimension to pivot on.")
+@click.option("--json", "as_json", is_flag=True)
+def ga4_pivot_report_cmd(property_id, dimensions, metrics, start_date, end_date, pivot_dim, as_json):
+    """Run a GA4 pivot report (cross-tabulation)."""
+    enforce_allowed_caller()
+    dims = [d.strip() for d in dimensions.split(",")]
+    mets = [m.strip() for m in metrics.split(",")]
+    pivots = [{"fieldNames": [pivot_dim], "limit": 10, "orderBys": [{"metric": {"metricName": mets[0]}, "desc": True}]}]
+    data = ga4_run_pivot_report(get_credentials(), dims, mets,
+        [{"startDate": start_date, "endDate": end_date}], pivots, property_id=property_id)
+    if as_json:
+        return print_json(data)
+    rows_raw = data.get("rows", [])
+    dim_h = [h.get("name", "") for h in data.get("dimensionHeaders", [])]
+    met_h = [h.get("name", "") for h in data.get("metricHeaders", [])]
+    rows = []
+    for row in rows_raw:
+        r = {dim_h[i]: dv.get("value", "") for i, dv in enumerate(row.get("dimensionValues", []))}
+        r.update({met_h[i]: mv.get("value", "") for i, mv in enumerate(row.get("metricValues", []))})
+        rows.append(r)
+    print_table(rows, dim_h + met_h)
+    click.echo(f"\n  {len(rows)} row(s)")
+
+
+@ga4.command("check-compatibility")
+@click.option("--property", "property_id", default=None)
+@click.option("--dimensions", "-d", default="date,sessionSource")
+@click.option("--metrics", "-m", default="sessions,totalRevenue")
+@click.option("--json", "as_json", is_flag=True)
+def ga4_check_compatibility_cmd(property_id, dimensions, metrics, as_json):
+    """Check which GA4 dimension+metric combinations are compatible."""
+    enforce_allowed_caller()
+    dims = [d.strip() for d in dimensions.split(",")]
+    mets = [m.strip() for m in metrics.split(",")]
+    data = ga4_check_compatibility(get_credentials(), dims, mets, property_id=property_id)
+    if as_json:
+        return print_json(data)
+    click.secho("\n  Dimension Compatibility\n", bold=True)
+    dim_compat = data.get("dimensionCompatibilities", [])
+    dim_rows = [{"dimension": (d.get("dimensionMetadata") or {}).get("apiName", ""),
+                 "compatibility": d.get("compatibility", "")} for d in dim_compat]
+    print_table(dim_rows, ["dimension", "compatibility"])
+    click.echo()
+    click.secho("  Metric Compatibility\n", bold=True)
+    met_compat = data.get("metricCompatibilities", [])
+    met_rows = [{"metric": (m.get("metricMetadata") or {}).get("apiName", ""),
+                 "compatibility": m.get("compatibility", "")} for m in met_compat]
+    print_table(met_rows, ["metric", "compatibility"])
 
 
 # ── GA4 Key Events (Admin API) ───────────────────────────────
@@ -3076,6 +3306,65 @@ def milestones(limit, as_json):
         return
     print_table([flatten(r) for r in rows] if rows else rows)
     click.echo(f"\n  {len(rows)} milestone(s)")
+
+
+# ── KB commands ──────────────────────────────────────────────
+
+@cli.group()
+def kb():
+    """Knowledge Base — API version drift detection and KB surfacing."""
+    pass
+
+
+@kb.command("check")
+@click.option("--json", "as_json", is_flag=True)
+def kb_check_cmd(as_json):
+    """Compare code API versions against kb/manifest.json. Exits non-zero on drift."""
+    import sys
+    results = check_drift()
+    if as_json:
+        return print_json(results)
+    click.secho("\n  KB Drift Check\n", fg="white", bold=True)
+    for r in results:
+        status = r["status"]
+        color = "red" if r["drift"] else "green"
+        click.secho(
+            f"  [{status}] {r['slug']:15s} manifest={r['manifest_version']:8s} code={r['code_version']:8s}  {r['api']}",
+            fg=color,
+        )
+    drifts = [r for r in results if r["drift"]]
+    click.echo()
+    if drifts:
+        click.secho(f"  {len(drifts)} DRIFT(S) detected. Update kb/<api>.md + manifest.json when bumping API versions.", fg="red")
+        sys.exit(1)
+    else:
+        click.secho("  All API versions aligned with KB manifest.", fg="green")
+
+
+@kb.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def kb_list_cmd(as_json):
+    """List all KB files with their API coverage."""
+    files = list_kb_files()
+    if as_json:
+        return print_json(files)
+    rows = [{"file": f["file"], "api": f["api"][:40], "exists": f["exists"], "size_bytes": f["size_bytes"]} for f in files]
+    print_table(rows, ["file", "api", "exists", "size_bytes"])
+
+
+@kb.command("show")
+@click.argument("api")
+def kb_show_cmd(api):
+    """Show KB documentation for an API (by slug or filename)."""
+    try:
+        content = show_kb_file(api)
+        click.echo(content)
+    except FileNotFoundError as e:
+        click.secho(f"✗ {e}", fg="red", err=True)
+        manifest = load_manifest()
+        slugs = sorted(set(e["slug"] for e in manifest))
+        click.echo(f"  Available slugs: {', '.join(slugs)}", err=True)
+        raise SystemExit(1)
 
 
 # ── Register grouped aliases ────────────────────────────────

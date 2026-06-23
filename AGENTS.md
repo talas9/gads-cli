@@ -80,3 +80,21 @@ tools/gads <command> [SUBCOMMAND] [OPTIONS]
 # or equivalently:
 gads-cli/gads <command> [SUBCOMMAND] [OPTIONS]
 ```
+
+## KB Version Drift Rule
+
+**When you bump an API or SDK version, you MUST also update:**
+1. The relevant `kb/<api>.md` file to reflect the new version, any changed endpoints, and new gotchas.
+2. `kb/manifest.json` — update the `current_version` field for the affected API slug.
+3. Run `gads kb check` to verify no drift remains. This command exits non-zero on drift and is CI-able.
+
+**The KB drift check** (`gads kb check`) compares version strings embedded in the service modules (`ads.py`, `ga4.py`, `gbp.py`, `gsc.py`) against `kb/manifest.json`. A mismatch means the KB docs are stale relative to the code.
+
+**Example workflow when bumping Google Ads API:**
+```bash
+# 1. Update config.py default or .env
+# 2. Update kb/google-ads.md — version, endpoints, gotchas
+# 3. Update kb/manifest.json — "current_version" for slug "google-ads"
+# 4. Run drift check
+gads kb check   # must exit 0
+```

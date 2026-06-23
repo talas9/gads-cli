@@ -4,7 +4,7 @@
 # Install:
 #   curl -fsSL https://raw.githubusercontent.com/talas9/gads-cli/main/scripts/install.sh | bash
 #
-# Interactive — detects Claude Code, gsd-pi, ruflo. Asks where to install,
+# Interactive — detects Claude Code and gsd-pi. Asks where to install,
 # wires agents + skills + hooks, runs auth setup.
 #
 set -euo pipefail
@@ -35,7 +35,7 @@ Options:
   --dir PATH    Custom CLI install location
   --skip-auth   Skip OAuth setup (for CI/testing)
 
-Detects Claude Code, gsd-pi, and ruflo automatically.
+Detects Claude Code and gsd-pi automatically.
 EOF
       exit 0 ;;
     *) echo "Unknown: $1"; exit 1 ;;
@@ -110,11 +110,10 @@ $PY -m pip install --quiet --user click requests google-auth google-auth-oauthli
 # ── Step 4: Detect platforms ────────────────────────────────
 step 4 6 "Detect AI platforms"
 
-HAS_CLAUDE=false; HAS_GSD=false; HAS_RUFLO=false
+HAS_CLAUDE=false; HAS_GSD=false
 command -v claude &>/dev/null && HAS_CLAUDE=true && ok "Claude Code"
 command -v gsd    &>/dev/null && HAS_GSD=true    && ok "gsd-pi"
-command -v ruflo  &>/dev/null && HAS_RUFLO=true  && ok "ruflo"
-$HAS_CLAUDE || $HAS_GSD || $HAS_RUFLO || warn "No AI platforms found — standalone install"
+$HAS_CLAUDE || $HAS_GSD || warn "No AI platforms found — standalone install"
 
 # ── Step 5: Wire agents + skills + hooks ─────────────────────
 step 5 6 "Install agents & skills"
@@ -123,7 +122,7 @@ step 5 6 "Install agents & skills"
 SCOPE="global"
 if $PROJECT_SCOPE; then
   SCOPE="project"
-elif [[ -t 0 ]] && ($HAS_CLAUDE || $HAS_GSD || $HAS_RUFLO); then
+elif [[ -t 0 ]] && ($HAS_CLAUDE || $HAS_GSD); then
   echo "  Scope:"
   echo "    1) Global  — all projects (~/.claude, ~/.gsd)"
   echo "    2) Project — this directory only"
@@ -296,14 +295,6 @@ if $HAS_GSD; then
     install_for "gsd-pi" "$HOME/.gsd/agent/agents" "$HOME/.gsd/agent/skills" "" ""
   else
     install_for "gsd-pi" ".gsd/agents" ".gsd/skills" "" ""
-  fi
-fi
-
-if $HAS_RUFLO; then
-  if [[ "$SCOPE" == "global" ]]; then
-    install_for "ruflo" "$HOME/.ruflo/agents" "" "" ""
-  else
-    install_for "ruflo" ".ruflo/agents" "" "" ""
   fi
 fi
 

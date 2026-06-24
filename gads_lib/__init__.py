@@ -1,6 +1,6 @@
 """Internal library for the gads CLI."""
 
-__version__ = "3.8.2"
+__version__ = "3.9.0"
 
 from .config import (
     PROJECT_ROOT,

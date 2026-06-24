@@ -533,13 +533,13 @@ class TestVersion:
                 f"Version part {part!r} is not numeric in {gads_lib.__version__!r}"
             )
 
-    def test_version_is_3_8_2(self):
-        """gads_lib.__version__ == '3.8.2'."""
+    def test_version_is_3_9_0(self):
+        """gads_lib.__version__ == '3.9.0'."""
         import gads_lib
 
-        assert gads_lib.__version__ == "3.8.2", (
-            f"Expected version 3.8.2, got {gads_lib.__version__!r}. "
-            "Bump __version__ in gads_lib/__init__.py when releasing v3.8.2."
+        assert gads_lib.__version__ == "3.9.0", (
+            f"Expected version 3.9.0, got {gads_lib.__version__!r}. "
+            "Bump __version__ in gads_lib/__init__.py when releasing v3.9.0."
         )
 
 

@@ -70,6 +70,7 @@ from gads_lib import (
     mc_list_datafeeds,
     mc_list_product_statuses,
     mc_list_products,
+    mc_register_gcp,
     now_local,
     print_json,
     print_table,
@@ -1732,6 +1733,62 @@ def merchant_returns(as_json):
              "label": p.get("label",""),
              "days": (p.get("policy") or {}).get("days", (p.get("policy") or {}).get("numberOfDays",""))} for p in policies]
     print_table(rows, ["name", "country", "label", "days"])
+
+
+@merchant.command("register-gcp")
+@click.option("--developer-email", "-e", required=True,
+              help="Email address of the GCP project developer to register with the Merchant account.")
+@click.option("--account", "account_id", default=None,
+              help="Merchant Center account ID (default: MERCHANT_CENTER_ID from config).")
+@click.option("--json", "as_json", is_flag=True)
+def merchant_register_gcp(developer_email, account_id, as_json):
+    """Register the GCP project with a Merchant Center account (fixes GCP_NOT_REGISTERED errors).
+
+    Calls POST /accounts/v1/accounts/{account}/developerRegistration:registerGcp
+    with {"developerEmail": EMAIL}.  This resolves the auth/gcp_unknown error
+    that blocks merchant API reads when your GCP OAuth project has not been
+    associated with the MC account.
+
+    \\b
+    Examples:
+      gads merchant register-gcp --developer-email admin@example.com
+      gads merchant register-gcp -e admin@example.com --account 12345678 --json
+
+    After success: wait ~5 minutes before retrying merchant commands.
+    This is a one-time setup step per GCP project + MC account pair.
+    """
+    enforce_allowed_caller()
+    creds = get_credentials()
+    effective_account = account_id or MERCHANT_CENTER_ID
+    if not effective_account:
+        if as_json:
+            print_json({"error": {"code": "VALIDATION", "message": "No Merchant Center account ID — set GOOGLE_MERCHANT_CENTER_ID or pass --account."}})
+        else:
+            click.secho("  Error: No Merchant Center account ID configured.", fg="red")
+            click.echo("  Set GOOGLE_MERCHANT_CENTER_ID in your .env or pass --account ACCOUNT_ID.")
+        raise SystemExit(EXIT_CODES["VALIDATION"])
+
+    data = mc_register_gcp(creds, developer_email=developer_email,
+                           account_id=effective_account, as_json=as_json)
+
+    if as_json:
+        # Success: emit the API response + metadata
+        return print_json({
+            "status": "registered",
+            "account": effective_account,
+            "developer_email": developer_email,
+            "response": data,
+            "next_step": "Wait ~5 minutes then retry merchant commands.",
+        })
+
+    # Human-readable success
+    click.secho("\n  GCP project registered with Merchant Center account.", fg="green", bold=True)
+    click.echo(f"  Account:          {effective_account}")
+    click.echo(f"  Developer email:  {developer_email}")
+    click.secho("\n  Next step: wait ~5 minutes, then retry:", fg="yellow")
+    click.echo("    gads merchant account")
+    click.echo("    gads merchant status")
+
 
 # ── GA4 commands ─────────────────────────────────────────────
 

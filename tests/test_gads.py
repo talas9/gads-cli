@@ -2401,6 +2401,126 @@ class TestMcListProductStatuses:
         assert result["products"][0]["offerId"] == "SKU-001"
 
 
+class TestMcRegisterGcp:
+    """mc_register_gcp — POST to developerRegistration:registerGcp."""
+
+    def _fake_ok_resp(self):
+        """Minimal HTTP 200 response with empty body (API acks with {})."""
+        r = MagicMock()
+        r.status_code = 200
+        r.text = "{}"
+        r.json.return_value = {}
+        return r
+
+    def test_post_method(self, fake_creds):
+        """mc_register_gcp uses POST, not GET."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="admin@example.com")
+
+        assert mock_req.call_args[0][0] == "POST"
+
+    def test_url_contains_developer_registration(self, fake_creds):
+        """URL path includes developerRegistration:registerGcp."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="admin@example.com")
+
+        called_url = mock_req.call_args[0][1]
+        assert "developerRegistration:registerGcp" in called_url
+        assert "merchantapi.googleapis.com" in called_url
+
+    def test_url_uses_configured_account(self, fake_creds):
+        """URL embeds the configured MERCHANT_CENTER_ID (88887777 from conftest env)."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="admin@example.com")
+
+        called_url = mock_req.call_args[0][1]
+        assert "88887777" in called_url
+
+    def test_url_uses_explicit_account(self, fake_creds):
+        """When account_id is passed, it overrides the configured ID."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="admin@example.com",
+                            account_id="99999999")
+
+        called_url = mock_req.call_args[0][1]
+        assert "99999999" in called_url
+
+    def test_request_body_contains_developer_email(self, fake_creds):
+        """POST body is {"developerEmail": email}."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="dev@company.com")
+
+        _, kwargs = mock_req.call_args
+        body = kwargs.get("json") or {}
+        assert body.get("developerEmail") == "dev@company.com"
+
+    def test_error_envelope_on_403(self, fake_creds, capsys):
+        """as_json=True routes 403 through the JSON error envelope and exits 5."""
+        from gads_lib.merchant import mc_register_gcp
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "GCP project not authorized",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                mc_register_gcp(fake_creds, developer_email="admin@example.com", as_json=True)
+
+        assert exc_info.value.code == 5
+        out = capsys.readouterr().out
+        envelope = json.loads(out)
+        assert "error" in envelope
+
+    def test_cli_help_exits_0(self):
+        """gads merchant register-gcp --help exits 0."""
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["merchant", "register-gcp", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "register" in result.output.lower()
+        assert "--developer-email" in result.output
+
+    def test_cli_json_output_on_success(self, fake_creds, capsys):
+        """gads merchant register-gcp --json emits status:registered JSON."""
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        runner = CliRunner()
+        with patch("gads_lib.cli.get_credentials", return_value=fake_creds), \
+             patch("gads_lib.cli.mc_register_gcp", return_value={}):
+            result = runner.invoke(
+                cli,
+                ["merchant", "register-gcp",
+                 "--developer-email", "admin@talas.ae",
+                 "--json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert parsed["status"] == "registered"
+        assert parsed["developer_email"] == "admin@talas.ae"
+        assert "next_step" in parsed
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # GROUP F — Error envelope tests
 # ═══════════════════════════════════════════════════════════════════════════════

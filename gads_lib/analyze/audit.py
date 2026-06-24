@@ -441,6 +441,9 @@ def _check_keyword_qs(creds, d_from: str, d_to: str) -> tuple[int, dict]:
                ad_group_criterion.quality_info.post_click_quality_score,
                ad_group_criterion.quality_info.creative_quality_score,
                ad_group_criterion.quality_info.search_predicted_ctr,
+               campaign.status,
+               ad_group.status,
+               ad_group_criterion.status,
                metrics.impressions
         FROM keyword_view
         WHERE segments.date BETWEEN '{d_from}' AND '{d_to}'
@@ -534,8 +537,10 @@ def _check_negative_coverage(creds) -> tuple[int, dict]:
     # Check campaign-level negative keywords
     neg_rows = run_gaql(creds, """
         SELECT campaign.name,
+               campaign.status,
                campaign_criterion.keyword.text,
-               campaign_criterion.negative
+               campaign_criterion.negative,
+               campaign_criterion.type
         FROM campaign_criterion
         WHERE campaign_criterion.negative = true
           AND campaign_criterion.type = 'KEYWORD'
@@ -644,13 +649,17 @@ def _check_sitelink_coverage(creds, d_from: str, d_to: str) -> tuple[int, dict]:
     if not active_campaigns:
         return 50, {"note": "No active SEARCH campaigns found", "covered": 0, "total": 0}
 
-    # Get campaigns with sitelink assets
+    # Get campaigns with sitelink assets.
+    # NOTE: campaign_asset.asset_type is not selectable in GAQL; use asset.type instead.
+    # Join campaign_asset with asset to get the type via the asset resource.
+    # Any field used in WHERE must also appear in SELECT (API v24 requirement).
     asset_rows = run_gaql(creds, """
         SELECT campaign.name,
-               campaign_asset.asset_type,
+               campaign.status,
+               asset.type,
                campaign_asset.status
         FROM campaign_asset
-        WHERE campaign_asset.asset_type = 'SITELINK'
+        WHERE asset.type = 'SITELINK'
           AND campaign.status != 'REMOVED'
           AND campaign_asset.status != 'REMOVED'
         LIMIT 200

@@ -59,6 +59,7 @@ from .merchant import (
     mc_list_datafeeds,
     mc_list_product_statuses,
     mc_list_products,
+    mc_register_gcp,
 )
 from .ga4 import (
     ga4_get_metadata,

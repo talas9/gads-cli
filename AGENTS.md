@@ -81,6 +81,17 @@ tools/gads <command> [SUBCOMMAND] [OPTIONS]
 gads-cli/gads <command> [SUBCOMMAND] [OPTIONS]
 ```
 
+## Merchant Center Developer Registration
+
+Fix `auth/gcp_unknown` / `GCP_NOT_REGISTERED` errors without console steps:
+
+```bash
+tools/gads merchant register-gcp --developer-email admin@talas.ae
+tools/gads merchant register-gcp -e admin@talas.ae --account 12345678 --json
+```
+
+After success, wait ~5 minutes then retry merchant commands. One-time per GCP project + MC account pair.
+
 ## Read-Only Analysis Commands
 
 All analysis and audit commands are safe to run at any time — they make no account mutations.

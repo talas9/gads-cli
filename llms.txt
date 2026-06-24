@@ -15,6 +15,13 @@ A Google Ads / Google platform CLI built for agent-driven automation.
 
 ## v3.9.0 New Commands
 
+### Merchant Center
+`gads merchant register-gcp -e EMAIL [--account ID] [--json]`
+Registers the GCP OAuth project with Merchant Center (fixes GCP_NOT_REGISTERED).
+POST to developerRegistration:registerGcp. One-time setup; wait ~5 min after.
+
+
+
 7 new read-only gap checks under `gads analyze`:
 - `rsa-lengths` — headlines < 20 or descriptions < 60 chars
 - `rsa-duplicates` — intra-RSA duplicate headline detection

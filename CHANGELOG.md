@@ -26,6 +26,8 @@ All notable changes to this project will be documented in this file.
 
 - **All checks read-only** — only `run_gaql` (SELECT GAQL); no account mutations. Date windows end yesterday (24-48h attribution lag respected).
 
+- **`gads merchant register-gcp`** — registers the caller's GCP OAuth project with a Merchant Center account by calling `POST /accounts/v1/accounts/{account}/developerRegistration:registerGcp`. Fixes the `auth/gcp_unknown` / `GCP_NOT_REGISTERED` error that blocks Merchant API reads when the GCP project has not been associated with the MC account. Uses the existing `content` OAuth scope (no re-auth required). Defaults `--account` to `GOOGLE_MERCHANT_CENTER_ID`. Human-readable and `--json` modes; errors routed through the v3.8.2 error-envelope standard. After success, wait ~5 minutes before retrying merchant commands. KB (`kb/merchant-api.md`) updated with Developer Registration API reference.
+
 ### Changed
 
 - Test suite expanded from 174 → 217 tests (all passing).

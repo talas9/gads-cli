@@ -38,6 +38,9 @@ from gads_lib import (
     ga4_get_metadata,
     ga4_run_realtime_report,
     ga4_run_report,
+    ga4_batch_run_reports,
+    ga4_run_pivot_report,
+    ga4_check_compatibility,
     list_key_events,
     create_key_event,
     delete_key_event,
@@ -51,6 +54,10 @@ from gads_lib import (
     gbp_daily_metrics,
     gbp_multi_daily_metrics,
     gbp_search_keywords_monthly,
+    gbp_batch_get_reviews,
+    gbp_list_local_posts,
+    gbp_create_local_post,
+    gbp_delete_local_post,
     DAILY_METRICS,
     generate_keyword_ideas,
     generate_keyword_forecast,
@@ -72,14 +79,28 @@ from gads_lib import (
 
 
 from gads_lib import __version__
-from gads_lib.gsc import gsc_list_sites, gsc_search_analytics
+from gads_lib.gsc import gsc_list_sites, gsc_search_analytics, gsc_list_sitemaps, gsc_url_inspect
+from gads_lib.kb import check_drift, list_kb_files, show_kb_file, load_manifest
+from gads_lib.output import EXIT_CODES, print_error
+from gads_lib.catalog import build_catalog
+from gads_lib import dbread
 
 
-@click.group()
+@click.group(context_settings={"auto_envvar_prefix": "GADS"})
 @click.version_option(__version__, prog_name="gads")
-def cli():
+@click.option("--plain", is_flag=True, help="Deterministic output: no color, no emoji (for parsing).")
+@click.option("--quiet", "-q", is_flag=True, help="Suppress non-essential progress/info output.")
+@click.pass_context
+def cli(ctx, plain, quiet):
     """gads — Unified Google platform CLI."""
-    pass
+    ctx.ensure_object(dict)
+    ctx.obj["plain"] = plain
+    ctx.obj["quiet"] = quiet
+    if plain:
+        # Strip ANSI color globally for deterministic, parseable output.
+        import os as _os
+        _os.environ["NO_COLOR"] = "1"
+        ctx.color = False
 
 
 @cli.group()
@@ -712,7 +733,8 @@ def query(gaql, limit, as_json):
 @click.option("--agent", default="claude-code")
 @click.option("--snapshot-ref", default="")
 @click.option("--script", default="")
-def log(action, details, reason, campaign, campaign_id, agent, snapshot_ref, script):
+@click.option("--json", "as_json", is_flag=True)
+def log(action, details, reason, campaign, campaign_id, agent, snapshot_ref, script, as_json):
     """Log an action to the changelog (append-only)."""
     import json as _json
     ts = now_local()
@@ -728,7 +750,10 @@ def log(action, details, reason, campaign, campaign_id, agent, snapshot_ref, scr
             (ts, action, campaign, campaign_id, details, reason, agent, snapshot_ref, script, _json.dumps(raw)),
         )
         conn.commit()
-        click.secho(f"✓ Logged: {action} at {ts}", fg="green")
+        if as_json:
+            print_json({"logged": True, "timestamp": ts, "action": action, "details": details})
+        else:
+            click.secho(f"✓ Logged: {action} at {ts}", fg="green")
     finally:
         conn.close()
 
@@ -736,7 +761,8 @@ def log(action, details, reason, campaign, campaign_id, agent, snapshot_ref, scr
 @cli.command()
 @click.argument("name")
 @click.option("--save-file", is_flag=True, help="Also save JSON to snapshots/ directory.")
-def snapshot(name, save_file):
+@click.option("--json", "as_json", is_flag=True)
+def snapshot(name, save_file, as_json):
     """Snapshot current campaign configs from the API."""
     import json as _json
     creds = get_credentials()
@@ -747,7 +773,8 @@ def snapshot(name, save_file):
            campaign.target_cpa.target_cpa_micros, campaign.target_roas.target_roas
     FROM campaign WHERE campaign.status != 'REMOVED' ORDER BY campaign.name
     """
-    click.echo("Fetching campaign configs from API...")
+    if not as_json:
+        click.echo("Fetching campaign configs from API...")
     results = run_gaql(creds, gaql)
     configs = []
     for r in results:
@@ -762,7 +789,8 @@ def snapshot(name, save_file):
             "target_roas": float(camp.get("targetRoas", {}).get("targetRoas", 0)),
         })
 
-    click.echo(f"  Got {len(configs)} campaigns")
+    if not as_json:
+        click.echo(f"  Got {len(configs)} campaigns")
     conn = get_db()
     today = today_local()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -782,14 +810,22 @@ def snapshot(name, save_file):
                  (filename, today, datetime.now().strftime("%H:%M:%S"), name, ""))
     conn.commit()
     conn.close()
-    click.secho(f"✓ Saved {len(configs)} configs (date={today})", fg="green")
 
+    written_path = None
     if save_file:
         SNAPSHOTS_DIR.mkdir(exist_ok=True)
         filepath = SNAPSHOTS_DIR / filename
         with open(filepath, "w") as f:
             _json.dump({"name": name, "date": today, "campaigns": configs}, f, indent=2)
-        click.secho(f"✓ Written: {filepath}", fg="green")
+        written_path = str(filepath)
+
+    if as_json:
+        print_json({"saved": True, "name": name, "date": today, "count": len(configs),
+                    "db_record": filename, "file": written_path, "campaigns": configs})
+        return
+    click.secho(f"✓ Saved {len(configs)} configs (date={today})", fg="green")
+    if written_path:
+        click.secho(f"✓ Written: {written_path}", fg="green")
 
 
 @cli.command()
@@ -894,11 +930,13 @@ def config(as_json, from_db):
 @click.option("--days", "-d", type=int, default=3)
 @click.option("--config", "with_config", is_flag=True)
 @click.option("--push", is_flag=True)
-def refresh(days, with_config, push):
+@click.option("--json", "as_json", is_flag=True)
+def refresh(days, with_config, push, as_json):
     """Pull fresh data from the API into the local database."""
     date_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     date_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    click.echo(f"Fetching: {date_from} → {date_to}")
+    if not as_json:
+        click.echo(f"Fetching: {date_from} → {date_to}")
     creds = get_credentials()
 
     q = f"""
@@ -931,7 +969,9 @@ def refresh(days, with_config, push):
              all_conversions, interactions)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
     conn.commit()
-    click.secho(f"  ✓ {len(rows)} rows updated", fg="green")
+    if not as_json:
+        click.secho(f"  ✓ {len(rows)} rows updated", fg="green")
+    config_updated = False
 
     if with_config:
         cfg_q = """
@@ -956,16 +996,25 @@ def refresh(days, with_config, push):
                  int(camp.get("targetCpa", {}).get("targetCpaMicros", 0)) / 1_000_000,
                  float(camp.get("targetRoas", {}).get("targetRoas", 0))))
         conn.commit()
-        click.secho("  ✓ Campaign configs updated", fg="green")
+        config_updated = True
+        if not as_json:
+            click.secho("  ✓ Campaign configs updated", fg="green")
     conn.close()
 
+    pushed = False
     if push:
         os.chdir(str(PROJECT_ROOT))
         subprocess.run(["git", "add", str(DB_PATH)], check=True)
         subprocess.run(["git", "commit", "-m", f"data: refresh {date_from} to {date_to}"], check=False)
         subprocess.run(["git", "pull", "--rebase"], check=False)
         subprocess.run(["git", "push"], check=False)
-        click.secho("  ✓ Git sync done", fg="green")
+        pushed = True
+        if not as_json:
+            click.secho("  ✓ Git sync done", fg="green")
+
+    if as_json:
+        print_json({"refreshed": True, "date_from": date_from, "date_to": date_to,
+                    "rows_updated": len(rows), "config_updated": config_updated, "pushed": pushed})
 
 
 # ── GBP commands ─────────────────────────────────────────────
@@ -975,7 +1024,7 @@ def refresh(days, with_config, push):
 def gbp_accounts(as_json):
     """List accessible Business Profile accounts."""
     enforce_allowed_caller()
-    data = gbp_list_accounts(get_credentials())
+    data = gbp_list_accounts(get_credentials(), as_json=as_json)
     accounts = data.get("accounts", [])
     if as_json: return print_json(accounts)
     rows = [{"name": a.get("name",""), "account_name": a.get("accountName",""),
@@ -989,7 +1038,8 @@ def gbp_locations(account_name, as_json):
     """List locations for an account."""
     enforce_allowed_caller()
     data = gbp_list_locations(get_credentials(), account_name,
-        read_mask="name,title,storeCode,phoneNumbers,websiteUri,languageCode,storefrontAddress,metadata")
+        read_mask="name,title,storeCode,phoneNumbers,websiteUri,languageCode,storefrontAddress,metadata",
+        as_json=as_json)
     locations = data.get("locations", [])
     if as_json: return print_json(locations)
     rows = []
@@ -1008,7 +1058,8 @@ def gbp_location(location_name, as_json):
     """Get one location detail."""
     enforce_allowed_caller()
     data = gbp_get_location(get_credentials(), location_name,
-        read_mask="name,title,storeCode,phoneNumbers,websiteUri,regularHours,specialHours,serviceArea,storefrontAddress,metadata,profile,labels,languageCode")
+        read_mask="name,title,storeCode,phoneNumbers,websiteUri,regularHours,specialHours,serviceArea,storefrontAddress,metadata,profile,labels,languageCode",
+        as_json=as_json)
     if as_json: return print_json(data)
     rows = [{"field": k, "value": v} for k, v in data.items() if not isinstance(v, (dict, list))]
     print_table(rows, ["field", "value"])
@@ -1019,7 +1070,7 @@ def gbp_location(location_name, as_json):
 def gbp_reviews(location_name, as_json):
     """List reviews for a location."""
     enforce_allowed_caller()
-    data = gbp_list_reviews(get_credentials(), location_name)
+    data = gbp_list_reviews(get_credentials(), location_name, as_json=as_json)
     reviews = data.get("reviews", [])
     if as_json: return print_json(reviews)
     rows = [{"name": r.get("name",""), "reviewer": ((r.get("reviewer") or {}).get("displayName")) or "",
@@ -1028,6 +1079,90 @@ def gbp_reviews(location_name, as_json):
              "reply": ((r.get("reviewReply") or {}).get("comment")) or "",
              "updated": r.get("updateTime","")} for r in reviews]
     print_table(rows, ["name", "reviewer", "stars", "comment", "reply", "updated"])
+
+
+@gbp.command("batch-reviews")
+@click.argument("location_names", nargs=-1, required=True)
+@click.option("--account", "account_name", default="", help="Account name (optional, for context).")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_batch_reviews_cmd(location_names, account_name, as_json):
+    """Fetch reviews from multiple locations at once."""
+    enforce_allowed_caller()
+    data = gbp_batch_get_reviews(get_credentials(), account_name, list(location_names), as_json=as_json)
+    if as_json:
+        return print_json(data)
+    for loc, reviews in data.items():
+        click.secho(f"\n  {loc} ({len(reviews)} review(s))", bold=True)
+        rows = [{"reviewer": ((r.get("reviewer") or {}).get("displayName")) or "",
+                 "stars": r.get("starRating", ""),
+                 "comment": (r.get("comment", "")[:60] + "…") if len(r.get("comment", "")) > 60 else r.get("comment", ""),
+                 "updated": r.get("updateTime", "")} for r in reviews]
+        if rows:
+            print_table(rows, ["reviewer", "stars", "comment", "updated"])
+
+
+@gbp.command("local-posts")
+@click.option("--account", "account_name", required=True, help="Account resource name (accounts/ID).")
+@click.option("--location", "location_id", required=True, help="Location ID (numeric).")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_local_posts_cmd(account_name, location_id, as_json):
+    """List local posts for a GBP location."""
+    enforce_allowed_caller()
+    data = gbp_list_local_posts(get_credentials(), account_name, location_id, as_json=as_json)
+    posts = data.get("localPosts", [])
+    if as_json:
+        return print_json(posts)
+    rows = [{"name": p.get("name", "").split("/")[-1],
+             "state": p.get("state", ""),
+             "topic_type": p.get("topicType", ""),
+             "summary": (p.get("summary", "")[:60] + "…") if len(p.get("summary", "")) > 60 else p.get("summary", ""),
+             "created": p.get("createTime", "")} for p in posts]
+    print_table(rows, ["name", "state", "topic_type", "summary", "created"])
+
+
+@gbp.command("create-post")
+@click.option("--account", "account_name", required=True, help="Account resource name (accounts/ID).")
+@click.option("--location", "location_id", required=True, help="Location ID (numeric).")
+@click.option("--summary", required=True, help="Post text (required).")
+@click.option("--topic-type", default="STANDARD", help="Post type: STANDARD, EVENT, OFFER, ALERT.")
+@click.option("--call-to-action-url", "cta_url", default=None, help="URL for the CTA button.")
+@click.option("--call-to-action-type", "cta_type", default=None, help="CTA type: LEARN_MORE, BOOK, ORDER, BUY, SIGN_UP, CALL.")
+@click.option("--dry-run", is_flag=True, help="Show what would be sent without creating.")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_create_post_cmd(account_name, location_id, summary, topic_type, cta_url, cta_type, dry_run, as_json):
+    """Create a local post for a GBP location. [WRITE — not live-mutation-verified]"""
+    enforce_allowed_caller()
+    body = {"summary": summary, "topicType": topic_type.upper()}
+    if cta_url and cta_type:
+        body["callToAction"] = {"actionType": cta_type.upper(), "url": cta_url}
+    if dry_run:
+        if as_json:
+            return print_json({"dry_run": True, "body": body})
+        click.secho(f"  DRY RUN: would POST to accounts/{account_name}/locations/{location_id}/localPosts", fg="yellow")
+        click.echo(f"  Body: {body}")
+        return
+    data = gbp_create_local_post(get_credentials(), account_name, location_id, body, as_json=as_json)
+    if as_json:
+        return print_json(data)
+    click.secho(f"  Created post: {data.get('name', '')}", fg="green")
+
+
+@gbp.command("delete-post")
+@click.option("--account", "account_name", required=True, help="Account resource name (accounts/ID).")
+@click.option("--location", "location_id", required=True, help="Location ID (numeric).")
+@click.argument("post_id")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation.")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_delete_post_cmd(account_name, location_id, post_id, yes, as_json):
+    """Delete a local post. [WRITE — not live-mutation-verified]"""
+    enforce_allowed_caller()
+    if not yes:
+        click.confirm(f"  Delete local post {post_id}?", abort=True)
+    data = gbp_delete_local_post(get_credentials(), account_name, location_id, post_id, as_json=as_json)
+    if as_json:
+        return print_json(data or {"deleted": True, "post_id": post_id})
+    click.secho(f"  Deleted post {post_id}", fg="green")
+
 
 @gbp.command("reply-review")
 @click.argument("review_name")
@@ -1112,12 +1247,12 @@ def gbp_perf_all(days, metrics, as_json):
     end = _today_date() - timedelta(days=1)
     start = end - timedelta(days=days - 1)
 
-    accts = gbp_list_accounts(creds)
+    accts = gbp_list_accounts(creds, as_json=as_json)
     all_results = {}
     for acct in accts.get("accounts", []):
         if acct.get("type") != "LOCATION_GROUP":
             continue
-        locs = gbp_list_locations(creds, acct["name"], read_mask="name,title")
+        locs = gbp_list_locations(creds, acct["name"], read_mask="name,title", as_json=as_json)
         for loc in locs.get("locations", []):
             title = loc.get("title", loc["name"])
             click.echo(f"  Fetching {title}...", err=True)
@@ -1174,7 +1309,7 @@ def gbp_search_keywords(location, months, limit, as_json):
     while start_m < 1:
         start_m += 12
         start_y -= 1
-    keywords = gbp_search_keywords_monthly(creds, loc, (start_y, start_m), end_month, page_size=limit)
+    keywords = gbp_search_keywords_monthly(creds, loc, (start_y, start_m), end_month, page_size=limit, as_json=as_json)
     if as_json:
         return print_json(keywords)
     print_table(keywords[:limit], ["keyword", "impressions"])
@@ -1357,7 +1492,7 @@ def gsc():
 def gsc_sites_cmd(as_json):
     """List verified Search Console sites."""
     enforce_allowed_caller()
-    data = gsc_list_sites(get_credentials())
+    data = gsc_list_sites(get_credentials(), as_json=as_json)
     sites = data.get("siteEntry", [])
     if as_json:
         return print_json(sites)
@@ -1376,7 +1511,7 @@ def gsc_queries_cmd(site, days, limit, as_json):
     creds = get_credentials()
     end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
     start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
-    data = gsc_search_analytics(creds, site, start, end, dimensions=["query"], row_limit=limit)
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["query"], row_limit=limit, as_json=as_json)
     rows_raw = data.get("rows", [])
     if as_json:
         return print_json(rows_raw)
@@ -1398,7 +1533,7 @@ def gsc_pages_cmd(site, days, limit, as_json):
     creds = get_credentials()
     end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
     start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
-    data = gsc_search_analytics(creds, site, start, end, dimensions=["page"], row_limit=limit)
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["page"], row_limit=limit, as_json=as_json)
     rows_raw = data.get("rows", [])
     if as_json:
         return print_json(rows_raw)
@@ -1419,7 +1554,7 @@ def gsc_perf_cmd(site, days, as_json):
     creds = get_credentials()
     end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
     start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
-    data = gsc_search_analytics(creds, site, start, end, dimensions=["date"], row_limit=1000)
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["date"], row_limit=1000, as_json=as_json)
     rows_raw = data.get("rows", [])
     if as_json:
         return print_json(rows_raw)
@@ -1431,6 +1566,52 @@ def gsc_perf_cmd(site, days, as_json):
     print_table(rows, ["date", "clicks", "impressions", "ctr", "position"])
 
 
+@gsc.command("sitemaps")
+@click.option("-s", "--site", required=True, help="Site URL (e.g. https://shop.talas.ae/).")
+@click.option("--json", "as_json", is_flag=True)
+def gsc_sitemaps_cmd(site, as_json):
+    """List submitted sitemaps for a Search Console property."""
+    enforce_allowed_caller()
+    data = gsc_list_sitemaps(get_credentials(), site, as_json=as_json)
+    sitemaps = data.get("sitemap", [])
+    if as_json:
+        return print_json(sitemaps)
+    rows = [{"path": s.get("path", ""), "last_submitted": s.get("lastSubmitted", ""),
+             "type": s.get("type", ""), "is_index": s.get("isSitemapIndex", False),
+             "warnings": s.get("warnings", "0"), "errors": s.get("errors", "0")} for s in sitemaps]
+    print_table(rows, ["path", "last_submitted", "type", "is_index", "warnings", "errors"])
+
+
+@gsc.command("inspect")
+@click.argument("url")
+@click.option("-s", "--site", required=True, help="Verified Search Console property URL.")
+@click.option("--lang", default="en-US", help="Language code (default en-US).")
+@click.option("--json", "as_json", is_flag=True)
+def gsc_inspect_cmd(url, site, lang, as_json):
+    """Inspect a URL's index status via Search Console URL Inspection API."""
+    enforce_allowed_caller()
+    data = gsc_url_inspect(get_credentials(), url, site, language_code=lang, as_json=as_json)
+    if as_json:
+        return print_json(data)
+    result = data.get("inspectionResult", {})
+    index = result.get("indexStatusResult", {})
+    click.secho(f"\n  URL Inspection: {url}\n", bold=True)
+    fields = [
+        ("verdict", index.get("verdict", "")),
+        ("coverage_state", index.get("coverageState", "")),
+        ("indexing_state", index.get("indexingState", "")),
+        ("page_fetch_state", index.get("pageFetchState", "")),
+        ("robots_txt_state", index.get("robotsTxtState", "")),
+        ("last_crawl", index.get("lastCrawlTime", "")),
+        ("crawled_as", index.get("crawledAs", "")),
+        ("canonical_google", index.get("googleCanonical", "")),
+        ("canonical_user", index.get("userCanonical", "")),
+        ("mobile_usability", (result.get("mobileUsabilityResult") or {}).get("verdict", "")),
+    ]
+    rows = [{"field": k, "value": v} for k, v in fields if v]
+    print_table(rows, ["field", "value"])
+
+
 # ── Merchant commands ────────────────────────────────────────
 
 @merchant.command("account")
@@ -1438,7 +1619,7 @@ def gsc_perf_cmd(site, days, as_json):
 def merchant_account(as_json):
     """Account info."""
     enforce_allowed_caller()
-    data = mc_get_account(get_credentials())
+    data = mc_get_account(get_credentials(), as_json=as_json)
     if as_json: return print_json(data)
     rows = [{"field": k, "value": v} for k, v in data.items() if not isinstance(v, (dict, list))]
     print_table(rows, ["field", "value"])
@@ -1448,11 +1629,12 @@ def merchant_account(as_json):
 def merchant_status(as_json):
     """Account issues."""
     enforce_allowed_caller()
-    data = mc_get_account_status(get_credentials())
+    data = mc_get_account_status(get_credentials(), as_json=as_json)
     if as_json: return print_json(data)
-    issues = data.get("accountLevelIssues", [])
+    issues = data.get("accountIssues", [])
     if not issues: return click.secho("  No issues.", fg="green")
-    rows = [{"id": i.get("id",""), "severity": i.get("severity",""), "title": i.get("title",""),
+    rows = [{"id": (i.get("name","").split("/")[-1] if i.get("name") else ""),
+             "severity": i.get("severity",""), "title": i.get("title",""),
              "detail": (i.get("detail","")[:80]+"…") if len(i.get("detail",""))>80 else i.get("detail","")}
             for i in issues]
     print_table(rows, ["id", "severity", "title", "detail"])
@@ -1463,14 +1645,27 @@ def merchant_status(as_json):
 def merchant_products(limit, as_json):
     """List products."""
     enforce_allowed_caller()
-    data = mc_list_products(get_credentials(), max_results=limit)
-    products = data.get("resources", [])
+    data = mc_list_products(get_credentials(), max_results=limit, as_json=as_json)
+    products = data.get("products", [])
     if as_json: return print_json(products)
-    rows = [{"id": p.get("id",""),
-             "title": (p.get("title","")[:50]+"…") if len(p.get("title",""))>50 else p.get("title",""),
-             "channel": p.get("channel",""), "availability": p.get("availability",""),
-             "price": f"{p.get('price',{}).get('value','')} {p.get('price',{}).get('currency','')}"} for p in products]
-    print_table(rows, ["id", "title", "channel", "availability", "price"])
+    def _price(attrs):
+        pr = attrs.get("price") or {}
+        micros = pr.get("amountMicros")
+        if micros in (None, ""):
+            return ""
+        try:
+            return f"{int(micros)/1_000_000:.2f} {pr.get('currencyCode','')}".strip()
+        except (TypeError, ValueError):
+            return f"{micros} {pr.get('currencyCode','')}".strip()
+    rows = []
+    for p in products:
+        attrs = p.get("productAttributes") or {}
+        title = attrs.get("title","")
+        rows.append({"id": p.get("offerId",""),
+                     "title": (title[:50]+"…") if len(title)>50 else title,
+                     "availability": attrs.get("availability",""),
+                     "price": _price(attrs)})
+    print_table(rows, ["id", "title", "availability", "price"])
 
 @merchant.command("product-status")
 @click.option("--limit", "-l", type=int, default=20)
@@ -1478,13 +1673,19 @@ def merchant_products(limit, as_json):
 def merchant_product_status(limit, as_json):
     """Product approval statuses."""
     enforce_allowed_caller()
-    data = mc_list_product_statuses(get_credentials(), max_results=limit)
-    statuses = data.get("resources", [])
+    data = mc_list_product_statuses(get_credentials(), max_results=limit, as_json=as_json)
+    statuses = data.get("products", [])
     if as_json: return print_json(statuses)
-    rows = [{"product_id": s.get("productId",""),
-             "title": (s.get("title","")[:40]+"…") if len(s.get("title",""))>40 else s.get("title",""),
-             "destinations": ", ".join(f"{d.get('destination','')}: {d.get('status','')}" for d in s.get("destinationStatuses",[])[:3]),
-             "issues": len(s.get("itemLevelIssues",[]))} for s in statuses]
+    rows = []
+    for s in statuses:
+        attrs = s.get("productAttributes") or {}
+        status = s.get("productStatus") or {}
+        title = attrs.get("title","")
+        dests = status.get("destinationStatuses", [])
+        rows.append({"product_id": s.get("offerId",""),
+                     "title": (title[:40]+"…") if len(title)>40 else title,
+                     "destinations": ", ".join(d.get("reportingContext", d.get("destination","")) for d in dests[:3]),
+                     "issues": len(status.get("itemLevelIssues", []))})
     print_table(rows, ["product_id", "title", "destinations", "issues"])
 
 @merchant.command("feeds")
@@ -1492,22 +1693,30 @@ def merchant_product_status(limit, as_json):
 def merchant_feeds(as_json):
     """Data feeds."""
     enforce_allowed_caller()
-    data = mc_list_datafeeds(get_credentials())
-    feeds = data.get("resources", [])
+    data = mc_list_datafeeds(get_credentials(), as_json=as_json)
+    feeds = data.get("dataSources", [])
     if as_json: return print_json(feeds)
-    rows = [{"id": f.get("id",""), "name": f.get("name",""),
-             "content_type": f.get("contentType",""), "file_name": f.get("fileName") or ""} for f in feeds]
-    print_table(rows, ["id", "name", "content_type", "file_name"])
+    def _ds_type(f):
+        for k in ("primaryProductDataSource", "supplementalProductDataSource",
+                  "localInventoryDataSource", "regionalInventoryDataSource",
+                  "promotionDataSource", "merchantReviewDataSource", "productReviewDataSource"):
+            if k in f:
+                return k
+        return f.get("input", "")
+    rows = [{"id": f.get("dataSourceId",""), "name": f.get("displayName",""),
+             "type": _ds_type(f), "file_name": (f.get("fileInput") or {}).get("fileName","")} for f in feeds]
+    print_table(rows, ["id", "name", "type", "file_name"])
 
 @merchant.command("shipping")
 @click.option("--json", "as_json", is_flag=True)
 def merchant_shipping(as_json):
     """Shipping settings."""
     enforce_allowed_caller()
-    data = mc_get_shipping(get_credentials())
+    data = mc_get_shipping(get_credentials(), as_json=as_json)
     if as_json: return print_json(data)
-    rows = [{"name": s.get("name",""), "country": s.get("deliveryCountry",""),
-             "currency": s.get("currency",""), "active": s.get("active","")} for s in data.get("services",[])]
+    rows = [{"name": s.get("serviceName",""),
+             "country": ", ".join(s.get("deliveryCountries", [])),
+             "currency": s.get("currencyCode",""), "active": s.get("active","")} for s in data.get("services",[])]
     print_table(rows, ["name", "country", "currency", "active"])
 
 @merchant.command("returns")
@@ -1515,11 +1724,13 @@ def merchant_shipping(as_json):
 def merchant_returns(as_json):
     """Return policy."""
     enforce_allowed_caller()
-    data = mc_get_return_policy(get_credentials())
+    data = mc_get_return_policy(get_credentials(), as_json=as_json)
     if as_json: return print_json(data)
-    policies = data.get("resources", data.get("returnPolicies", [data] if "name" in data else []))
-    rows = [{"name": p.get("name",""), "country": p.get("country",""),
-             "label": p.get("label",""), "days": (p.get("policy") or {}).get("numberOfDays","")} for p in policies]
+    policies = data.get("onlineReturnPolicies", [])
+    rows = [{"name": (p.get("name","").split("/")[-1] if p.get("name") else ""),
+             "country": ", ".join(p.get("countries", [])),
+             "label": p.get("label",""),
+             "days": (p.get("policy") or {}).get("days", (p.get("policy") or {}).get("numberOfDays",""))} for p in policies]
     print_table(rows, ["name", "country", "label", "days"])
 
 # ── GA4 commands ─────────────────────────────────────────────
@@ -1530,7 +1741,7 @@ def merchant_returns(as_json):
 def ga4_metadata_cmd(property_id, as_json):
     """Available dimensions and metrics."""
     enforce_allowed_caller()
-    data = ga4_get_metadata(get_credentials(), property_id=property_id)
+    data = ga4_get_metadata(get_credentials(), property_id=property_id, as_json=as_json)
     if as_json: return print_json(data)
     dims, mets = data.get("dimensions",[]), data.get("metrics",[])
     click.secho(f"\n  Dimensions: {len(dims)}   Metrics: {len(mets)}\n", bold=True)
@@ -1552,7 +1763,7 @@ def ga4_report_cmd(property_id, dimensions, metrics, start_date, end_date, limit
     dims = [d.strip() for d in dimensions.split(",")]
     mets = [m.strip() for m in metrics.split(",")]
     data = ga4_run_report(get_credentials(), dims, mets,
-        [{"startDate": start_date, "endDate": end_date}], property_id=property_id, limit=limit)
+        [{"startDate": start_date, "endDate": end_date}], property_id=property_id, limit=limit, as_json=as_json)
     if as_json: return print_json(data)
     dim_h = [h.get("name","") for h in data.get("dimensionHeaders",[])]
     met_h = [h.get("name","") for h in data.get("metricHeaders",[])]
@@ -1574,7 +1785,7 @@ def ga4_realtime_cmd(property_id, dimensions, metrics, as_json):
     enforce_allowed_caller()
     dims = [d.strip() for d in dimensions.split(",")]
     mets = [m.strip() for m in metrics.split(",")]
-    data = ga4_run_realtime_report(get_credentials(), dims, mets, property_id=property_id)
+    data = ga4_run_realtime_report(get_credentials(), dims, mets, property_id=property_id, as_json=as_json)
     if as_json: return print_json(data)
     dim_h = [h.get("name","") for h in data.get("dimensionHeaders",[])]
     met_h = [h.get("name","") for h in data.get("metricHeaders",[])]
@@ -1585,6 +1796,98 @@ def ga4_realtime_cmd(property_id, dimensions, metrics, as_json):
         rows.append(r)
     print_table(rows, dim_h + met_h)
     click.echo(f"\n  {len(rows)} row(s)")
+
+
+@ga4.command("batch-report")
+@click.option("--property", "property_id", default=None)
+@click.option("--requests-file", "requests_file", default=None, help="JSON file with list of report requests.")
+@click.option("--json", "as_json", is_flag=True)
+def ga4_batch_report_cmd(property_id, requests_file, as_json):
+    """Run multiple GA4 reports in one API call (batchRunReports)."""
+    enforce_allowed_caller()
+    import json as _json
+    if requests_file:
+        with open(requests_file) as f:
+            requests_list = _json.load(f)
+    else:
+        # Default: two reports — sessions by source, and events by date
+        requests_list = [
+            {"dimensions": [{"name": "sessionSource"}], "metrics": [{"name": "sessions"}],
+             "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}], "limit": 10},
+            {"dimensions": [{"name": "date"}], "metrics": [{"name": "keyEvents"}],
+             "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}], "limit": 30},
+        ]
+    data = ga4_batch_run_reports(get_credentials(), requests_list, property_id=property_id, as_json=as_json)
+    if as_json:
+        return print_json(data)
+    reports = data.get("reports", [])
+    for i, report in enumerate(reports):
+        click.secho(f"\n  Report {i+1}:", fg="white", bold=True)
+        dim_h = [h.get("name", "") for h in report.get("dimensionHeaders", [])]
+        met_h = [h.get("name", "") for h in report.get("metricHeaders", [])]
+        rows = []
+        for row in report.get("rows", []):
+            r = {dim_h[j]: dv.get("value", "") for j, dv in enumerate(row.get("dimensionValues", []))}
+            r.update({met_h[j]: mv.get("value", "") for j, mv in enumerate(row.get("metricValues", []))})
+            rows.append(r)
+        print_table(rows, dim_h + met_h)
+        click.echo(f"  {len(rows)} row(s)")
+
+
+@ga4.command("pivot-report")
+@click.option("--property", "property_id", default=None)
+@click.option("--dimensions", "-d", default="sessionSource,deviceCategory")
+@click.option("--metrics", "-m", default="sessions")
+@click.option("--start", "start_date", default="7daysAgo")
+@click.option("--end", "end_date", default="yesterday")
+@click.option("--pivot-dimension", "pivot_dim", default="deviceCategory", help="Dimension to pivot on.")
+@click.option("--json", "as_json", is_flag=True)
+def ga4_pivot_report_cmd(property_id, dimensions, metrics, start_date, end_date, pivot_dim, as_json):
+    """Run a GA4 pivot report (cross-tabulation)."""
+    enforce_allowed_caller()
+    dims = [d.strip() for d in dimensions.split(",")]
+    mets = [m.strip() for m in metrics.split(",")]
+    pivots = [{"fieldNames": [pivot_dim], "limit": 10, "orderBys": [{"metric": {"metricName": mets[0]}, "desc": True}]}]
+    data = ga4_run_pivot_report(get_credentials(), dims, mets,
+        [{"startDate": start_date, "endDate": end_date}], pivots, property_id=property_id, as_json=as_json)
+    if as_json:
+        return print_json(data)
+    rows_raw = data.get("rows", [])
+    dim_h = [h.get("name", "") for h in data.get("dimensionHeaders", [])]
+    met_h = [h.get("name", "") for h in data.get("metricHeaders", [])]
+    rows = []
+    for row in rows_raw:
+        r = {dim_h[i]: dv.get("value", "") for i, dv in enumerate(row.get("dimensionValues", []))}
+        r.update({met_h[i]: mv.get("value", "") for i, mv in enumerate(row.get("metricValues", []))})
+        rows.append(r)
+    print_table(rows, dim_h + met_h)
+    click.echo(f"\n  {len(rows)} row(s)")
+
+
+@ga4.command("check-compatibility")
+@click.option("--property", "property_id", default=None)
+@click.option("--dimensions", "-d", default="date,sessionSource")
+@click.option("--metrics", "-m", default="sessions,totalRevenue")
+@click.option("--json", "as_json", is_flag=True)
+def ga4_check_compatibility_cmd(property_id, dimensions, metrics, as_json):
+    """Check which GA4 dimension+metric combinations are compatible."""
+    enforce_allowed_caller()
+    dims = [d.strip() for d in dimensions.split(",")]
+    mets = [m.strip() for m in metrics.split(",")]
+    data = ga4_check_compatibility(get_credentials(), dims, mets, property_id=property_id, as_json=as_json)
+    if as_json:
+        return print_json(data)
+    click.secho("\n  Dimension Compatibility\n", bold=True)
+    dim_compat = data.get("dimensionCompatibilities", [])
+    dim_rows = [{"dimension": (d.get("dimensionMetadata") or {}).get("apiName", ""),
+                 "compatibility": d.get("compatibility", "")} for d in dim_compat]
+    print_table(dim_rows, ["dimension", "compatibility"])
+    click.echo()
+    click.secho("  Metric Compatibility\n", bold=True)
+    met_compat = data.get("metricCompatibilities", [])
+    met_rows = [{"metric": (m.get("metricMetadata") or {}).get("apiName", ""),
+                 "compatibility": m.get("compatibility", "")} for m in met_compat]
+    print_table(met_rows, ["metric", "compatibility"])
 
 
 # ── GA4 Key Events (Admin API) ───────────────────────────────
@@ -2140,17 +2443,53 @@ def keyword_search_terms(days, campaign_id, min_clicks, as_json):
                      "cpa": round(cost/conv,2) if conv>0 else "—"})
     print_table(rows, ["search_term", "campaign", "impr", "clicks", "conv", "cost", "cpa"])
 
+# ISO code → Google Ads language_constant ID
+# Verified live via: SELECT language_constant.id, language_constant.code FROM language_constant WHERE language_constant.code IN ('en','ar')
+_LANGUAGE_IDS = {"en": "1000", "ar": "1019"}
+
+# ISO country code → geo_target_constant ID (country-level only)
+# Verified live via: SELECT geo_target_constant.id, geo_target_constant.country_code FROM geo_target_constant WHERE geo_target_constant.country_code = 'AE' AND geo_target_constant.target_type = 'Country'
+_GEO_IDS = {"AE": "2784"}
+
+
+def _resolve_language(value):
+    """Accept an ISO code (e.g. 'en') or a raw numeric language_constant ID."""
+    if value is None:
+        return value
+    v = str(value).strip()
+    if v.isdigit():
+        return v
+    resolved = _LANGUAGE_IDS.get(v.lower())
+    if resolved:
+        return resolved
+    return v  # pass through; API will return a clear error if unknown
+
+
+def _resolve_geo(value):
+    """Accept an ISO country code (e.g. 'AE') or a raw numeric geo_target_constant ID."""
+    if value is None:
+        return value
+    v = str(value).strip()
+    if v.isdigit():
+        return v
+    resolved = _GEO_IDS.get(v.upper())
+    if resolved:
+        return resolved
+    return v  # pass through; API will return a clear error if unknown
+
+
 @keyword.command("ideas")
 @click.option("--keywords", "-k", default=None, help="Comma-separated seed keywords.")
 @click.option("--url", "-u", default=None, help="Seed URL for ideas.")
-@click.option("--language", default="1000", help="Language ID (default: 1000=English).")
-@click.option("--geo", default=None, help="Comma-separated geo target IDs (e.g. 2784=UAE).")
+@click.option("--language", default="1000", help="ISO code (e.g. 'en', 'ar') or numeric language_constant ID (default: 1000=English).")
+@click.option("--geo", default=None, help="Comma-separated ISO country codes (e.g. 'AE') or numeric geo_target_constant IDs (e.g. 2784=UAE).")
 @click.option("--json", "as_json", is_flag=True)
 def keyword_ideas_cmd(keywords, url, language, geo, as_json):
     """Generate keyword ideas (requires Standard Access dev token)."""
     kw_list = [k.strip() for k in keywords.split(",")] if keywords else None
-    geo_list = [g.strip() for g in geo.split(",")] if geo else None
-    result = generate_keyword_ideas(get_credentials(), keywords=kw_list, url=url, language_id=language, geo_ids=geo_list)
+    resolved_language = _resolve_language(language)
+    geo_list = [_resolve_geo(g.strip()) for g in geo.split(",")] if geo else None
+    result = generate_keyword_ideas(get_credentials(), keywords=kw_list, url=url, language_id=resolved_language, geo_ids=geo_list)
     if as_json:
         return print_json(result)
     ideas = result.get("results", [])
@@ -2167,14 +2506,15 @@ def keyword_ideas_cmd(keywords, url, language, geo, as_json):
 
 @keyword.command("forecast")
 @click.option("--keywords", "-k", required=True, help="Comma-separated keywords.")
-@click.option("--language", default="1000")
-@click.option("--geo", default=None, help="Comma-separated geo target IDs.")
+@click.option("--language", default="1000", help="ISO code (e.g. 'en', 'ar') or numeric language_constant ID (default: 1000=English).")
+@click.option("--geo", default=None, help="Comma-separated ISO country codes (e.g. 'AE') or numeric geo_target_constant IDs (e.g. 2784=UAE).")
 @click.option("--json", "as_json", is_flag=True)
 def keyword_forecast_cmd(keywords, language, geo, as_json):
     """Keyword traffic/cost forecast (requires Standard Access dev token)."""
     kw_list = [k.strip() for k in keywords.split(",")]
-    geo_list = [g.strip() for g in geo.split(",")] if geo else None
-    result = generate_keyword_forecast(get_credentials(), keywords=kw_list, language_id=language, geo_ids=geo_list)
+    resolved_language = _resolve_language(language)
+    geo_list = [_resolve_geo(g.strip()) for g in geo.split(",")] if geo else None
+    result = generate_keyword_forecast(get_credentials(), keywords=kw_list, language_id=resolved_language, geo_ids=geo_list)
     if as_json:
         return print_json(result)
     print_json(result)
@@ -2498,6 +2838,26 @@ def conversion_upload_cmd(gclid, action_id, conv_time, value, currency, dry_run,
         return
     result = ads_upload_click_conversions(get_credentials(), [conv], action_id)
     _auto_log("conversion_upload", f"gclid={gclid}")
+
+    # Check for partial failures (API returns 200 but some conversions failed)
+    partial_error = result.get("partialFailureError")
+    if partial_error:
+        if as_json:
+            return print_json({"status": "partial_failure", "partialFailureError": partial_error, "result": result})
+        click.secho("⚠ Partial failure: some conversions were not uploaded", fg="yellow", err=True)
+        # Extract per-conversion errors from partial failure details
+        details = partial_error.get("details", [])
+        for detail in details:
+            for error in detail.get("errors", []):
+                loc = error.get("location", {})
+                field_path = ".".join(
+                    str(op.get("fieldName", op.get("index", "?")))
+                    for op in loc.get("fieldPathElements", [])
+                ) or "unknown"
+                msg = error.get("errorCode", {})
+                click.secho(f"  ✗ [{field_path}] {msg}", fg="red", err=True)
+        raise SystemExit(1)
+
     if as_json:
         return print_json(result)
     click.secho("✓ Conversion uploaded", fg="green")
@@ -2809,6 +3169,226 @@ def accounts_cmd(as_json):
     print_table(rows, ["id", "name", "status", "manager"])
 
 
+# ── analyze: read-only analysis commands ────────────────────
+@cli.group()
+def analyze():
+    """Read-only analysis: landing pages, wasted spend, n-grams, ad copy, competition."""
+    pass
+
+
+@analyze.command("landing-page")
+@click.option("--branch", "-b", type=click.Choice(["qz3", "sja", "ind4"]), default="qz3",
+              help="Branch landing page to score.")
+@click.option("--url", "-u", default=None, help="Override URL (otherwise branch default).")
+@click.option("--timeout", type=int, default=20, help="HTTP timeout (seconds).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_landing_page(branch, url, timeout, as_json):
+    """Score a branch landing page for conversion readiness (read-only HTTP fetch)."""
+    from gads_lib.analyze.lp_score import score_landing_page, render_lp_score
+    result = score_landing_page(branch, url=url, timeout=timeout)
+    render_lp_score(result, as_json=as_json)
+
+
+@analyze.command("wasted-spend")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--min-cost", type=float, default=1.0, help="Ignore items below this AED cost.")
+@click.option("--cpa-multiple", type=float, default=2.0,
+              help="Flag below-average items whose CPA exceeds N x account avg CPA.")
+@click.option("--limit", "-l", type=int, default=25, help="Rows per table.")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_wasted_spend_cmd(days, min_cost, cpa_multiple, limit, as_json):
+    """AED-ranked wasted spend on zero/low-conversion search terms and campaigns."""
+    from gads_lib.analyze.wasted_spend import analyze_wasted_spend, render_wasted_spend
+    result = analyze_wasted_spend(get_credentials(), days=days, min_cost=min_cost,
+                                  cpa_multiple=cpa_multiple)
+    render_wasted_spend(result, as_json=as_json, limit=limit)
+
+
+@analyze.command("ngrams")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("-n", "n", type=int, default=3, help="Max n-gram size (produces 1..n).")
+@click.option("--min-cost", type=float, default=1.0, help="Ignore n-grams below this AED cost.")
+@click.option("--top", "-t", type=int, default=25, help="Rows per table.")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_ngrams_cmd(days, n, min_cost, top, as_json):
+    """N-gram clustering of search terms (Arabic + English) with negative candidates."""
+    from gads_lib.analyze.ngrams import analyze_ngrams, render_ngrams
+    result = analyze_ngrams(get_credentials(), days=days, n=n, min_cost=min_cost, top=top)
+    render_ngrams(result, as_json=as_json, top=top)
+
+
+@analyze.command("ad-copy")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--top", "-t", type=int, default=25, help="Rows in the ranked table.")
+@click.option("--violations-only", is_flag=True, help="Only show ads with rule violations.")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_ad_copy_cmd(days, top, violations_only, as_json):
+    """Performance-ranked RSA ads, validated against PARTS-ONLY business rules."""
+    from gads_lib.analyze.adcopy import analyze_adcopy, render_adcopy
+    result = analyze_adcopy(get_credentials(), days=days, top=max(top, 50))
+    render_adcopy(result, as_json=as_json, top=top, violations_only=violations_only)
+
+
+@analyze.command("competition")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--top", "-t", type=int, default=25, help="Rows in the pressure table.")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_competition_cmd(days, top, as_json):
+    """Competitive pressure via impression-share + auction-insights (best-effort)."""
+    from gads_lib.analyze.competitive import analyze_competitive, render_competitive
+    result = analyze_competitive(get_credentials(), days=days, top=max(top, 50))
+    render_competitive(result, as_json=as_json, top=top)
+
+
+# ── Catalog (machine-readable command manifest) ─────────────
+
+@cli.command()
+@click.option("--json", "as_json", is_flag=True, help="Emit the full command manifest as JSON.")
+def catalog(as_json):
+    """Emit a machine-readable manifest of every command, param, and help string.
+
+    Lets an agent discover the CLI's full capabilities without parsing --help.
+    """
+    manifest = build_catalog(cli, __version__)
+    if as_json:
+        print_json(manifest)
+        return
+    # Human-readable fallback: list commands + one-line help.
+    click.secho("\n  gads command catalog\n", fg="white", bold=True)
+
+    def _emit(commands, indent=2):
+        for name in sorted(commands):
+            entry = commands[name]
+            help_txt = (entry.get("help") or "").strip().splitlines()
+            help_one = help_txt[0] if help_txt else ""
+            click.echo(f"{' ' * indent}{name:<18} {help_one}")
+            if entry.get("subcommands"):
+                _emit(entry["subcommands"], indent + 4)
+
+    _emit(manifest["commands"])
+    click.echo(f"\n  Use 'gads catalog --json' for the full machine-readable manifest.\n")
+
+
+# ── Read-only history DB access ─────────────────────────────
+
+@cli.command(name="db")
+@click.argument("sql")
+@click.option("--limit", type=int, default=None, help="Cap the number of returned rows.")
+@click.option("--json", "as_json", is_flag=True)
+def db_query(sql, limit, as_json):
+    """Run a read-only SELECT against the local history database.
+
+    Only single SELECT/WITH queries are allowed; any mutating statement is rejected.
+    """
+    try:
+        rows = dbread.run_select(sql, limit=limit)
+    except dbread.UnsafeSQLError as e:
+        raise SystemExit(print_error(str(e), code="VALIDATION", as_json=as_json))
+    if as_json:
+        print_json(rows)
+        return
+    print_table([flatten(r) for r in rows] if rows else rows)
+    click.echo(f"\n  {len(rows)} row(s)")
+
+
+@cli.command()
+@click.option("--limit", "-n", type=int, default=50)
+@click.option("--json", "as_json", is_flag=True)
+def changelog(limit, as_json):
+    """Read the local changelog (append-only action history)."""
+    rows = dbread.read_changelog(limit=limit)
+    if as_json:
+        print_json(rows)
+        return
+    print_table([flatten(r) for r in rows] if rows else rows)
+    click.echo(f"\n  {len(rows)} entry(ies)")
+
+
+@cli.command()
+@click.option("--limit", "-n", type=int, default=50)
+@click.option("--json", "as_json", is_flag=True)
+def decisions(limit, as_json):
+    """Read the local decisions log."""
+    rows = dbread.read_decisions(limit=limit)
+    if as_json:
+        print_json(rows)
+        return
+    print_table([flatten(r) for r in rows] if rows else rows)
+    click.echo(f"\n  {len(rows)} decision(s)")
+
+
+@cli.command()
+@click.option("--limit", "-n", type=int, default=50)
+@click.option("--json", "as_json", is_flag=True)
+def milestones(limit, as_json):
+    """Read the local milestones log."""
+    rows = dbread.read_milestones(limit=limit)
+    if as_json:
+        print_json(rows)
+        return
+    print_table([flatten(r) for r in rows] if rows else rows)
+    click.echo(f"\n  {len(rows)} milestone(s)")
+
+
+# ── KB commands ──────────────────────────────────────────────
+
+@cli.group()
+def kb():
+    """Knowledge Base — API version drift detection and KB surfacing."""
+    pass
+
+
+@kb.command("check")
+@click.option("--json", "as_json", is_flag=True)
+def kb_check_cmd(as_json):
+    """Compare code API versions against kb/manifest.json. Exits non-zero on drift."""
+    import sys
+    results = check_drift()
+    if as_json:
+        return print_json(results)
+    click.secho("\n  KB Drift Check\n", fg="white", bold=True)
+    for r in results:
+        status = r["status"]
+        color = "red" if r["drift"] else "green"
+        click.secho(
+            f"  [{status}] {r['slug']:15s} manifest={r['manifest_version']:8s} code={r['code_version']:8s}  {r['api']}",
+            fg=color,
+        )
+    drifts = [r for r in results if r["drift"]]
+    click.echo()
+    if drifts:
+        click.secho(f"  {len(drifts)} DRIFT(S) detected. Update kb/<api>.md + manifest.json when bumping API versions.", fg="red")
+        sys.exit(1)
+    else:
+        click.secho("  All API versions aligned with KB manifest.", fg="green")
+
+
+@kb.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def kb_list_cmd(as_json):
+    """List all KB files with their API coverage."""
+    files = list_kb_files()
+    if as_json:
+        return print_json(files)
+    rows = [{"file": f["file"], "api": f["api"][:40], "exists": f["exists"], "size_bytes": f["size_bytes"]} for f in files]
+    print_table(rows, ["file", "api", "exists", "size_bytes"])
+
+
+@kb.command("show")
+@click.argument("api")
+def kb_show_cmd(api):
+    """Show KB documentation for an API (by slug or filename)."""
+    try:
+        content = show_kb_file(api)
+        click.echo(content)
+    except FileNotFoundError as e:
+        click.secho(f"✗ {e}", fg="red", err=True)
+        manifest = load_manifest()
+        slugs = sorted(set(e["slug"] for e in manifest))
+        click.echo(f"  Available slugs: {', '.join(slugs)}", err=True)
+        raise SystemExit(1)
+
+
 # ── Register grouped aliases ────────────────────────────────
 ads.add_command(query, name="query")
 ads.add_command(perf, name="perf")
@@ -2819,4 +3399,34 @@ ads.add_command(log, name="log")
 
 
 def main():
-    cli()
+    """Entry point with a structured error envelope and stable exit codes.
+
+    On failure, emits {"error": {...}} JSON to stderr when --json was requested,
+    otherwise a colored message. Honors meaningful exit codes from EXIT_CODES.
+    """
+    # Detect whether the invocation asked for JSON output (best-effort, for the
+    # top-level catch only — individual commands handle their own --json output).
+    want_json = "--json" in sys.argv
+    try:
+        cli(standalone_mode=False)
+    except SystemExit as e:
+        # Honor explicit exit codes raised by commands (already printed).
+        raise
+    except click.exceptions.Abort:
+        raise SystemExit(EXIT_CODES["GENERAL"])
+    except click.exceptions.UsageError as e:
+        # Preserve Click's own formatting on stderr, then exit with USAGE code.
+        e.show()
+        raise SystemExit(EXIT_CODES["USAGE"])
+    except click.ClickException as e:
+        raise SystemExit(print_error(e.format_message(), code="GENERAL", as_json=want_json))
+    except Exception as e:  # noqa: BLE001 — top-level safety net
+        code = "GENERAL"
+        msg = str(e).lower()
+        if "auth" in msg or "credential" in msg or "token" in msg or "401" in msg:
+            code = "AUTH"
+        elif "not found" in msg or "404" in msg:
+            code = "NOT_FOUND"
+        elif "403" in msg or "api" in msg or "quota" in msg:
+            code = "API"
+        raise SystemExit(print_error(f"{type(e).__name__}: {e}", code=code, as_json=want_json))

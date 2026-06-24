@@ -1,6 +1,6 @@
 """Internal library for the gads CLI."""
 
-__version__ = "3.3.0"
+__version__ = "3.8.2"
 
 from .config import (
     PROJECT_ROOT,
@@ -45,12 +45,15 @@ from .gbp import (
     gbp_daily_metrics,
     gbp_multi_daily_metrics,
     gbp_search_keywords_monthly,
+    gbp_batch_get_reviews,
+    gbp_list_local_posts,
+    gbp_create_local_post,
+    gbp_delete_local_post,
     DAILY_METRICS,
 )
 from .merchant import (
     mc_get_account,
     mc_get_account_status,
-    mc_get_datafeed_status,
     mc_get_return_policy,
     mc_get_shipping,
     mc_list_datafeeds,
@@ -61,10 +64,13 @@ from .ga4 import (
     ga4_get_metadata,
     ga4_run_realtime_report,
     ga4_run_report,
+    ga4_batch_run_reports,
+    ga4_run_pivot_report,
+    ga4_check_compatibility,
     list_key_events,
     create_key_event,
     delete_key_event,
     VALID_COUNTING_METHODS,
 )
-from .output import flatten, print_json, print_table
+from .output import flatten, print_json, print_table, print_error, EXIT_CODES
 from .timeutil import now_local, today_local

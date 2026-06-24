@@ -2,6 +2,269 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.8.2] - 2026-06-23
+
+### Fixed
+
+- **Uniform error routing (ads.py):** All Google Ads API call sites (`run_gaql`, `ads_search`, `ads_mutate`, `ads_batch_mutate`, `ads_upload_click_conversions`, `generate_keyword_ideas`, `generate_keyword_forecast`, and the job-create/job-run calls in `audience_upload_csv`) now route through `request_json()` from `gads_lib.http`. Under `--json`, 4xx errors emit a classified JSON envelope `{"error": {"code": ..., "message": ..., "action": ..., ...}}` to stdout and exit with code 5 instead of printing raw text to stderr and exiting 1.
+- **Uniform error routing (ga4.py):** `list_key_events`, `create_key_event`, and `delete_key_event` now accept `as_json=False` parameter. A new `_handle_admin_error()` helper routes errors through `classify_api_error` + JSON envelope under `--json` (exit 5), while preserving the GA4-specific human-readable messages (analytics.edit scope hint, property ID hint) for human mode. `_raise_for_admin_status` now exits with code 5 (EXIT_CODES["API"]) instead of 1.
+- **Uniform error routing (gbp.py):** `gbp_multi_daily_metrics` replaced raw `requests.get` + manual error check with `request_json()`. Errors now classify through the standard 4-class system instead of printing raw text and exiting 1.
+- **partialFailure surface (cli.py):** `conversion_upload_cmd` now checks `result.get("partialFailureError")` after a successful HTTP 200 response. If partial failures exist, the command warns in human mode (per-conversion field path and error code) or returns a structured `{"status":"partial_failure",...}` JSON in `--json` mode, and exits 1. Previously it silently printed "✓ Conversion uploaded" even when some conversions failed.
+
+### Added
+
+- **`generate_keyword_ideas` and `generate_keyword_forecast` now accept `as_json=False`** so callers can propagate `--json` into the error envelope path.
+- **Test coverage expanded from 64 → 127 tests.** New tests cover every endpoint in `ads.py`, `ga4.py`, `gbp.py`, `gsc.py`, and `merchant.py` — request-construction correctness (URL, body, params) AND error-envelope behaviour under `as_json=True`. All tests are offline (mocked HTTP).
+
+### Changed
+
+- **KB drift corrected (kb/search-console.md, kb/INDEX.md):** `gsc_url_inspect()` and `gsc_list_sitemaps()` are now correctly documented as implemented. The "CLI gap — not yet implemented" label on the URL Inspection API section and the "Not implemented" row for `sitemaps.*` in the coverage table have been updated. The coverage-gaps list no longer includes items 4 (URL Inspection) and 5 (sitemaps) as gaps.
+- **Env dep floors met:** `requests` upgraded from 2.32.3 → 2.34.2 (floor >=2.33.0); `python-dotenv` upgraded from 1.0.1 → 1.2.2 (floor >=1.2.2). All 127 tests pass on the new versions.
+
+## [3.8.1] - 2026-06-23
+### Fixed
+- `--json` mode: classified access errors (API_NOT_ENABLED, MERCHANT_NOT_REGISTERED, INSUFFICIENT_SCOPE, PERMISSION_DENIED) now emit a parseable JSON envelope on STDOUT instead of printing human-readable advisory text to STDERR with empty STDOUT. Exit code 5 preserved. The interactive gcloud-enable offer is suppressed in JSON mode.
+
+## [3.8.0] - 2026-06-23
+
+### Added
+
+- **KB comprehensive expansion (task #14):** All five KB files (google-ads.md, merchant-api.md,
+  ga4.md, gbp.md, search-console.md) now contain a full **Developer Guide** section alongside
+  the existing endpoint reference. Total KB grew from 5,793 → 10,764 lines. Each guide covers
+  schemas, enums, request/response shapes, workflows, limits, error patterns, and best practices —
+  LLM-agent-complete: implementable against the KB alone without re-fetching docs.
+  - `google-ads.md`: +1,406 lines — campaign creation, all bidding strategies, GAQL deep dive,
+    RSA constraints, PMax asset groups, Customer Match lifecycle, error handling, pagination,
+    rate limits, API versioning policy, mutation patterns.
+  - `merchant-api.md`: +1,037 lines — product schema (required/optional fields), feed types,
+    shipping setup, product status issues, productInputs write path, Reports sub-API, MCA
+    structure, error patterns, Inventories API.
+  - `ga4.md`: +873 lines — full report request schema, dimension/metric naming (no `ga:` prefix
+    in GA4), filter expressions, key events Admin API, realtime, batchRunReports, pivot, quota
+    buckets, Admin v1alpha vs v1beta resource table.
+  - `gbp.md`: +1,099 lines — allowlist approval process, location attributes, reviews workflow,
+    `fetchMultiDailyMetricsTimeSeries` (correct method name), monthly search keywords, local
+    posts, media management, Ads integration, retry patterns.
+  - `search-console.md`: +551 lines — Search Analytics full schema, all dimension/searchType
+    combos, pagination (rowLimit=25000 + startRow loop), dimensionFilterGroups, Sites/Sitemaps
+    APIs, URL Inspection API, OAuth scope mapping.
+  - `kb/INDEX.md`: updated with KB expansion table + resolved coverage gaps.
+
+- **GSC OAuth scope fix (task #18):** Added `https://www.googleapis.com/auth/webmasters.readonly`
+  to `SCOPES` in `generate_token.py`. This was the root cause of GSC 403 errors. **User must
+  re-run `python generate_token.py` to re-consent and receive the new scope in their token.**
+
+- **GA4 Admin API v1alpha → v1beta migration (task C):** Migrated `GA4_ADMIN_BASE` in
+  `gads_lib/ga4.py` from `analyticsadmin.googleapis.com/v1alpha` to
+  `analyticsadmin.googleapis.com/v1beta`. Key events (`list`, `create`, `delete`) exist
+  identically in both versions; v1beta carries the "no breaking changes" stability guarantee.
+  `gads kb check` now exits 0 with all APIs aligned.
+
+- **Code ↔ KB cross-references (task #15):** Added module-level docstrings citing KB file +
+  official doc URL, plus per-function `# KB: kb/<slug>.md § <section>` comments, to all five
+  service modules: `ads.py` (11 refs), `ga4.py` (9 refs), `gbp.py` (13 refs), `gsc.py`
+  (4 refs), `merchant.py` (7 refs). Total: 44 cross-reference annotations.
+
+- **Test suite (task #16):** Added `tests/test_gads.py` (58 tests, 100% pass, offline/CI-safe).
+  Covers: request construction correctness (GA4 body shape, v1beta URL, GSC startRow, Merchant
+  products URL, GBP perf URL), `--json` output structure, SELECT-only guard, error envelope +
+  exit codes, `gads kb check` alignment, manifest validity, version sentinel.
+
+- **Graceful access-error handling:** `gads_lib/output.py` gains `classify_api_error()` and
+  `offer_gcloud_enable()`; `gads_lib/http.py` now dispatches classified errors instead of
+  printing raw API responses. Four error classes handled:
+  1. **API_NOT_ENABLED** (403 SERVICE_DISABLED) — names the service, offers to run
+     `gcloud services enable <service>.googleapis.com --project <id>` interactively
+     (requires confirmation; falls back to console link if gcloud is absent/declined).
+  2. **MERCHANT_NOT_REGISTERED** (401 GCP_NOT_REGISTERED) — shows registration link;
+     gcloud cannot fix this.
+  3. **INSUFFICIENT_SCOPE** (403 INSUFFICIENT_AUTHENTICATION_SCOPES) — names the
+     exact missing scope per API and instructs `python generate_token.py`.
+  4. **PERMISSION_DENIED / allowlist** (403 PERMISSION_DENIED or 429 zero-quota) —
+     advises requesting allowlist access with the relevant GBP or IAM console link.
+  All paths exit with code 5 (`EXIT_CODES["API"]`) and never print a traceback. All 4
+  mappings covered by 7 new tests in `TestGracefulErrorHandling`.
+
+### Fixed
+
+- **GA4 `kb check` drift:** `gads kb check` previously flagged `[DRIFT] ga4 manifest=v1beta
+  code=v1alpha`. Resolved by migrating the code to v1beta. `kb check` now exits 0 cleanly.
+
+## [3.7.0] - 2026-06-23
+
+### Added
+- **GA4 Data API — `batchRunReports`** (`gads ga4 batch-report`): Run up to 5 GA4 reports in a
+  single API call, reducing quota overhead. Accepts a `--requests-file` JSON path or uses a
+  sensible default (sessions by source + key events by date). Live-verified against property
+  271773771.
+- **GA4 Data API — `runPivotReport`** (`gads ga4 pivot-report`): Cross-tabulation reports with
+  a configurable pivot dimension. Useful for campaign × device or source × medium breakdowns.
+- **GA4 Data API — `checkCompatibility`** (`gads ga4 check-compatibility`): Pre-validate which
+  dimension+metric combinations are compatible before running a report. Returns 378 dimension
+  and 107 metric compatibility entries for the Talas property. Live-verified.
+- **GSC — pagination via `startRow`** (`gads gsc queries/pages/performance`): All
+  `gsc_search_analytics` calls now support `start_row` offset pagination so queries returning
+  exactly `rowLimit` rows are no longer silently truncated.
+- **GSC — `dataState` exposure**: All Search Console analytics commands now support `--data-state`
+  (`final` / `all` / `hourly_all`) to opt into fresher unconfirmed data.
+- **GSC — server-side `dimensionFilterGroups`**: `gsc_search_analytics` now accepts
+  `dimension_filter_groups` parameter for server-side filtering before aggregation, avoiding
+  rowLimit truncation of large datasets.
+- **GSC — URL Inspection API** (`gads gsc inspect URL -s SITE`): Inspect any URL's Google index
+  status, indexing state, page fetch state, mobile usability, and last crawl time via the URL
+  Inspection API (`searchconsole.googleapis.com/v1`). Read-only. Verified via `--help`; live
+  verification pending token regeneration with `webmasters.readonly` scope (see note below).
+- **GSC — sitemaps list** (`gads gsc sitemaps -s SITE`): List all submitted sitemaps for a
+  Search Console property. Verified via `--help`; live verification pending token regen.
+- **GBP — batch-get reviews** (`gads gbp batch-reviews LOCATION_NAME...`): Fetch reviews from
+  multiple GBP locations in one command, returning a dict keyed by location name.
+- **GBP — local posts list** (`gads gbp local-posts --account A --location L`): List all local
+  posts for a GBP location using the legacy v4 API.
+- **GBP — local posts create/delete** (`gads gbp create-post` / `gads gbp delete-post`): CRUD
+  for GBP local posts. Both commands are WRITE operations — added and verified via `--help` /
+  `--dry-run`; NOT live-mutation-verified to avoid mutating the live account.
+- **KB drift check** (`gads kb check`): Compares API versions hard-coded in each service module
+  against `kb/manifest.json`. Exits non-zero on drift — CI-able. Detected real drift on first
+  run: GA4 Admin API uses `v1alpha` in code but `v1beta` is the stable KB-documented version
+  (flagged for future migration). `gads kb list` surfaces all KB files with sizes. `gads kb show
+  <slug>` prints the full KB doc for any API.
+- **KB directory committed**: `gads-cli/kb/` (5 files: google-ads.md, ga4.md, gbp.md,
+  search-console.md, merchant-api.md, INDEX.md, manifest.json) is now git-tracked as a shipping
+  deliverable.
+
+### Fixed
+- **GSC `gsc_search_analytics`**: Added `startRow` and `dataState` fields to the request body
+  (previously omitted, causing silent truncation at `rowLimit` and no way to request fresh data).
+
+### Notes
+- **GSC live verification pending**: All GSC commands require the `webmasters.readonly` OAuth
+  scope. The current token was generated before this scope was added. Re-run `gads auth login
+  --force` to regenerate the token and enable live GSC verification.
+- **Merchant skipped**: Merchant Center gaps deferred — the `merchantapi.googleapis.com` API is
+  not enabled on the GCP project yet. No Merchant changes in this release.
+- **GA4 Admin `v1alpha` known drift**: The KB drift check flags GA4 Admin API as DRIFT
+  (`v1alpha` in code vs `v1beta` in manifest). Key events still work on `v1alpha`; migrating to
+  `v1beta` is a separate task.
+
+## [3.6.0] - 2026-06-23
+
+### Changed
+- **Google Ads API default bumped `v19` → `v24`** (`gads_lib/config.py`). v19 was
+  sunset 2026-02-11; v24 is the current GA version. GAQL `searchStream`/`search`,
+  `mutate`, `uploadClickConversions`, and `generateKeywordIdeas` endpoints are
+  unchanged across v23→v24 — version-string-only. Docs (`CLAUDE.md`, `README.md`,
+  `.env.example`) updated to state v24.
+- **Keyword forecast rebuilt for v24** (`gads_lib/ads.py` `generate_keyword_forecast`).
+  v24 reshaped `generateKeywordForecastMetrics`: top-level key is now `campaign`
+  (was `campaignToForecast`), keywords moved into `campaign.adGroups[].keywords[]`
+  as `{text, matchType}`, `keywordPlanNetwork` removed, `biddingStrategy`
+  (manual CPC) is now required, and a forward-looking `forecastPeriod`
+  (`startDate`/`endDate`, `YYYY-MM-DD`) is required. The old body returned HTTP 400.
+
+### Fixed
+- **`keyword ideas` request payload** (`gads_lib/ads.py` `generate_keyword_ideas`) —
+  corrected to the documented `generateKeywordIdeas` REST schema: `language` is a
+  single `languageConstants/{id}` string (was the invalid `languageId`),
+  `geoTargetConstants` is an array of plain resource-name strings (was objects),
+  `keywordPlanNetwork` is now sent, and both-seed requests use `keywordAndUrlSeed`.
+  The command previously returned HTTP 400 for all inputs; now returns ideas.
+- **`keyword ideas` / `keyword forecast` accept ISO codes** for `--language`
+  (`en`, `ar`) and `--geo` (`AE`) in addition to numeric constant IDs, resolved
+  to verified `languageConstants`/`geoTargetConstants` IDs (`gads_lib/cli.py`).
+
+### Changed (breaking — Merchant `--json` shape)
+- **Merchant Center migrated from Content API for Shopping v2.1 to Merchant API v1**
+  (`gads_lib/merchant.py`, host `merchantapi.googleapis.com`). Content API v2.1
+  sunsets 2026-08-18. OAuth scope is unchanged (`.../auth/content`). The
+  `gads merchant ...` command names and human-readable table columns are preserved,
+  but `--json` now returns Merchant API v1 objects, so machine consumers must adapt:
+  - `products`: array `resources` → `products`; price `{value,currency}` →
+    `productAttributes.price.{amountMicros,currencyCode}` (micros); product id →
+    `offerId`; title/availability now under `productAttributes`; `channel` removed.
+  - `product-status`: no standalone endpoint in v1 — folded into the products
+    resource; statuses read from each product's `productStatus`.
+  - `status`: array `accountLevelIssues` → `accountIssues`.
+  - `feeds` (data sources): array `resources` → `dataSources`; `name` →
+    `displayName`; `fileName` → `fileInput.fileName`; `contentType` → type union.
+  - `shipping`: service `name` → `serviceName`; `deliveryCountry` →
+    `deliveryCountries[]`; `currency` → `currencyCode`.
+  - `returns`: array → `onlineReturnPolicies`.
+  All merchant commands remain read-only (GET).
+
+### Security
+- **Dependency floors raised** (`pyproject.toml`): `requests>=2.33.0` (closes
+  CVE-2024-47081 netrc leak and CVE-2026-25645 temp-file reuse),
+  `python-dotenv>=1.2.2` (closes CVE-2026-28684 symlink overwrite),
+  `click>=8.1`, `google-auth>=2.35`, `google-auth-oauthlib>=1.2`; dev `pytest>=9.0`,
+  `pytest-cov>=6.0` (held below 7.0 which dropped built-in subprocess coverage).
+
+### Notes
+- GA4 (Data API v1beta), GBP (Account/Business Info/Performance v1), and GSC
+  (webmasters/v3) confirmed current — unchanged. Monitor items: GA4 Admin and
+  GBP Reviews still require legacy surfaces (My Business v4 for reviews).
+
+## [3.5.0] - 2026-06-23
+
+### Added
+- **`catalog` command** — emits a complete machine-readable manifest of every
+  command, subcommand, param, type, default, and help string by walking the live
+  Click command tree (`gads catalog --json`). Lets an agent discover the CLI's
+  full capabilities without parsing `--help`. Human-readable fallback without
+  `--json`. New module `gads_lib/catalog.py`.
+- **Structured error envelope + stable exit codes** — `main()` now wraps the CLI
+  so failures emit `{"error":{"code":...,"message":...,"exit_code":N}}` to stderr
+  when `--json` is in effect (colored text otherwise). Stable codes: 0 OK,
+  1 GENERAL, 2 USAGE, 3 AUTH, 4 NOT_FOUND, 5 API, 6 VALIDATION, 7 DB. New
+  `print_error()` helper and `EXIT_CODES` in `gads_lib/output.py`.
+- **Read-only history-DB access**:
+  - `gads db "<SQL>" [--json] [--limit N]` — SELECT-only passthrough to the local
+    SQLite history DB. Rejects any mutating/multi-statement SQL (exit code 6) and
+    enforces `PRAGMA query_only` as defense in depth.
+  - `gads changelog` / `gads decisions` / `gads milestones` `[--json] [-n LIMIT]` —
+    native readers for the project's own memory tables.
+  - New module `gads_lib/dbread.py` with `assert_select_only`, `run_select`, and
+    the convenience readers.
+- **`--json` added to `log`, `snapshot`, `refresh`** — these three top-level
+  commands now emit structured JSON like every other command.
+- **Global `--plain` and `--quiet`/`-q` flags** — `--plain` produces
+  deterministic, no-color/no-emoji output for parsing; `--quiet` suppresses
+  non-essential progress output.
+- **`AGENTS.md` and `llms.txt`** at the CLI root — capability index documenting
+  how an agent should drive the CLI (catalog-first discovery, output contract,
+  exit codes, reading project memory, mutation discipline).
+
+### Changed
+- `cli` root group now carries global `--plain`/`--quiet` options and a context
+  object; `main()` runs Click with `standalone_mode=False` to own error handling.
+
+## [3.4.0] - 2026-06-23
+
+### Added
+- **`analyze` command group** (5 new read-only analysis commands; no account mutations):
+  - `analyze landing-page` — fetches a branch landing page over HTTP and scores it
+    (0-100) on message-match, trust signals, mobile/viewport, load weight,
+    WhatsApp/branch CTA, and `?branch=` survival; lists concrete issues. Branch
+    choices: qz3 / sja / ind4.
+  - `analyze wasted-spend` — AED-ranked wasted spend on zero-conversion and
+    below-average-CPA search terms and campaigns (window ends yesterday).
+  - `analyze ngrams` — 1/2/3-gram clustering of search terms (Arabic + English),
+    aggregating cost & conversions per n-gram and surfacing high-cost zero/low-conv
+    negative-keyword candidates.
+  - `analyze ad-copy` — performance-ranked RSA ads validated against PARTS-ONLY
+    business rules (no install/repair/workshop/battery-service; "Tesla" not "EV";
+    not OEM/Genuine-only; branch phone). Rules sourced from the `business_rules`
+    DB table plus encoded detectors; flags violations by severity.
+  - `analyze competition` — competitive pressure from impression-share metrics
+    (impression share, top/abs-top IS, rank-lost IS) per keyword, plus a
+    best-effort auction-insights attempt that degrades gracefully when the REST
+    API does not expose auction-insight fields.
+- New `gads_lib/analyze/` sub-package: `lp_score.py`, `wasted_spend.py`,
+  `ngrams.py`, `adcopy.py`, `competitive.py`.
+
+### Changed
+- Total command groups: 15 → 16 (added `analyze`).
+
 ## [3.3.0] - 2026-03-31
 
 ### Added

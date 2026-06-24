@@ -1,0 +1,20 @@
+# gads CLI
+
+A Google Ads / Google platform CLI built for agent-driven automation.
+
+## Discovery
+
+> Run `tools/gads catalog --json` to get the full command/parameter manifest.
+> This is the canonical entry point — do not hardcode command lists.
+
+## Reference
+
+- AGENTS.md — full capability index, output contract, exit codes, mutation discipline
+- `tools/gads --help` — top-level usage
+- `tools/gads <command> --help` — per-command usage
+
+## Account
+
+- Client: Talas Ads (355-285-6345)
+- Manager: 670-695-5825
+- Currency: AED | API version: v24

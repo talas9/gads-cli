@@ -1,3 +1,9 @@
+"""Google Business Profile API client.
+
+API: Google Business Profile (Account Management, Business Information, Legacy v4, Performance)
+KB reference: kb/gbp.md (relative to gads-cli root)
+Official docs: https://developers.google.com/my-business/reference/businessprofile/rest
+"""
 from .http import get_bearer_headers, request_json
 
 GBP_ACCOUNT_BASE = "https://mybusinessaccountmanagement.googleapis.com/v1"
@@ -5,11 +11,13 @@ GBP_INFO_BASE = "https://mybusinessbusinessinformation.googleapis.com/v1"
 GBP_V4_BASE = "https://mybusiness.googleapis.com/v4"
 
 
-def gbp_list_accounts(creds):
-    return request_json("GET", f"{GBP_ACCOUNT_BASE}/accounts", headers=get_bearer_headers(creds))
+# KB: kb/gbp.md § accounts | https://developers.google.com/my-business/reference/accountmanagement/rest/v1/accounts/list
+def gbp_list_accounts(creds, as_json=False):
+    return request_json("GET", f"{GBP_ACCOUNT_BASE}/accounts", headers=get_bearer_headers(creds), as_json=as_json)
 
 
-def gbp_list_locations(creds, account_name, page_size=100, read_mask=None):
+# KB: kb/gbp.md § locations | https://developers.google.com/my-business/reference/businessinformation/rest/v1/accounts.locations/list
+def gbp_list_locations(creds, account_name, page_size=100, read_mask=None, as_json=False):
     params = {"pageSize": page_size}
     if read_mask:
         params["readMask"] = read_mask
@@ -18,10 +26,12 @@ def gbp_list_locations(creds, account_name, page_size=100, read_mask=None):
         f"{GBP_INFO_BASE}/{account_name}/locations",
         headers=get_bearer_headers(creds),
         params=params,
+        as_json=as_json,
     )
 
 
-def gbp_get_location(creds, location_name, read_mask=None):
+# KB: kb/gbp.md § locations | https://developers.google.com/my-business/reference/businessinformation/rest/v1/accounts.locations/get
+def gbp_get_location(creds, location_name, read_mask=None, as_json=False):
     params = {}
     if read_mask:
         params["readMask"] = read_mask
@@ -30,32 +40,39 @@ def gbp_get_location(creds, location_name, read_mask=None):
         f"{GBP_INFO_BASE}/{location_name}",
         headers=get_bearer_headers(creds),
         params=params,
+        as_json=as_json,
     )
 
 
-def gbp_list_reviews(creds, location_name, page_size=50):
+# KB: kb/gbp.md § reviews | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/list
+def gbp_list_reviews(creds, location_name, page_size=50, as_json=False):
     return request_json(
         "GET",
         f"{GBP_V4_BASE}/{location_name}/reviews",
         headers=get_bearer_headers(creds),
         params={"pageSize": page_size},
+        as_json=as_json,
     )
 
 
-def gbp_reply_review(creds, review_name, comment):
+# KB: kb/gbp.md § reviews | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/updateReply
+def gbp_reply_review(creds, review_name, comment, as_json=False):
     return request_json(
         "PUT",
         f"{GBP_V4_BASE}/{review_name}/reply",
         headers=get_bearer_headers(creds),
         json_body={"comment": comment},
+        as_json=as_json,
     )
 
 
-def gbp_delete_reply(creds, review_name):
+# KB: kb/gbp.md § reviews | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/deleteReply
+def gbp_delete_reply(creds, review_name, as_json=False):
     return request_json(
         "DELETE",
         f"{GBP_V4_BASE}/{review_name}/reply",
         headers=get_bearer_headers(creds),
+        as_json=as_json,
     )
 
 
@@ -79,7 +96,8 @@ DAILY_METRICS = [
 ]
 
 
-def gbp_daily_metrics(creds, location_name, metric, start_date, end_date):
+# KB: kb/gbp.md § performance | https://developers.google.com/my-business/reference/businessprofileperformance/rest/v1/locations/getDailyMetricsTimeSeries
+def gbp_daily_metrics(creds, location_name, metric, start_date, end_date, as_json=False):
     """Fetch a single daily metric time series for a location.
 
     start_date/end_date: date objects or (year, month, day) tuples.
@@ -108,6 +126,7 @@ def gbp_daily_metrics(creds, location_name, metric, start_date, end_date):
         f"{GBP_PERF_BASE}/{location_name}:getDailyMetricsTimeSeries",
         headers=get_bearer_headers(creds),
         params=params,
+        as_json=as_json,
     )
     results = []
     for dv in data.get("timeSeries", {}).get("datedValues", []):
@@ -119,6 +138,7 @@ def gbp_daily_metrics(creds, location_name, metric, start_date, end_date):
     return results
 
 
+# KB: kb/gbp.md § performance | https://developers.google.com/my-business/reference/businessprofileperformance/rest/v1/locations/fetchMultiDailyMetricsTimeSeries
 def gbp_multi_daily_metrics(creds, location_name, metrics, start_date, end_date):
     """Fetch multiple daily metrics in a single API call.
 
@@ -141,23 +161,16 @@ def gbp_multi_daily_metrics(creds, location_name, metrics, start_date, end_date)
         "dailyRange.endDate.month": em,
         "dailyRange.endDate.day": ed,
     }
-    # fetchMultiDailyMetricsTimeSeries uses repeated dailyMetrics param
+    # fetchMultiDailyMetricsTimeSeries uses repeated dailyMetrics param which
+    # can't be expressed as a dict (duplicate keys), so we pre-build the URL.
     param_str = "&".join(f"dailyMetrics={m}" for m in metrics)
     base_str = "&".join(f"{k}={v}" for k, v in params.items())
+    full_url = f"{GBP_PERF_BASE}/{location_name}:fetchMultiDailyMetricsTimeSeries?{param_str}&{base_str}"
 
-    import requests as _requests
-    resp = _requests.get(
-        f"{GBP_PERF_BASE}/{location_name}:fetchMultiDailyMetricsTimeSeries?{param_str}&{base_str}",
-        headers=get_bearer_headers(creds),
-        timeout=30,
-    )
-    if resp.status_code >= 400:
-        import click
-        click.secho(f"✗ API Error {resp.status_code}: {resp.text[:800]}", fg="red", err=True)
-        raise SystemExit(1)
+    data = request_json("GET", full_url, headers=get_bearer_headers(creds), timeout=30)
 
     result = {}
-    for group in resp.json().get("multiDailyMetricTimeSeries", []):
+    for group in data.get("multiDailyMetricTimeSeries", []):
         for series in group.get("dailyMetricTimeSeries", []):
             metric_name = series.get("dailyMetric", "UNKNOWN")
             values = []
@@ -171,7 +184,8 @@ def gbp_multi_daily_metrics(creds, location_name, metrics, start_date, end_date)
     return result
 
 
-def gbp_search_keywords_monthly(creds, location_name, start_month, end_month, page_size=100):
+# KB: kb/gbp.md § performance | https://developers.google.com/my-business/reference/businessprofileperformance/rest/v1/locations.searchkeywords.impressions.monthly/list
+def gbp_search_keywords_monthly(creds, location_name, start_month, end_month, page_size=100, as_json=False):
     """Fetch monthly search keyword impressions.
 
     start_month/end_month: (year, month) tuples.
@@ -194,6 +208,7 @@ def gbp_search_keywords_monthly(creds, location_name, start_month, end_month, pa
             f"{GBP_PERF_BASE}/{location_name}/searchkeywords/impressions/monthly",
             headers=get_bearer_headers(creds),
             params=params,
+            as_json=as_json,
         )
         for kw in data.get("searchKeywordsCounts", []):
             all_keywords.append({
@@ -206,3 +221,89 @@ def gbp_search_keywords_monthly(creds, location_name, start_month, end_month, pa
         params["pageToken"] = token
 
     return sorted(all_keywords, key=lambda x: -x["impressions"])
+
+
+# ── Reviews batch helper ─────────────────────────────────────
+
+# KB: kb/gbp.md § reviews | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/list
+def gbp_batch_get_reviews(creds, account_name, location_names, page_size=50, as_json=False):
+    """Collect reviews for multiple locations.
+
+    GBP v4 has no true batch-reviews endpoint, so this iterates over each
+    location and calls gbp_list_reviews, returning a dict keyed by location
+    resource name.
+
+    Args:
+        creds: OAuth credentials.
+        account_name: e.g. "accounts/123456789" (unused by gbp_list_reviews
+            directly, kept for API symmetry / future use).
+        location_names: list of location resource names like
+            "accounts/X/locations/Y".
+        page_size: passed through to gbp_list_reviews for each location.
+
+    Returns:
+        {location_name: [review, ...]}
+    """
+    results = {}
+    for location_name in location_names:
+        resp = gbp_list_reviews(creds, location_name, page_size=page_size, as_json=as_json)
+        results[location_name] = resp.get("reviews", [])
+    return results
+
+
+# ── Local Posts CRUD ─────────────────────────────────────────
+
+# KB: kb/gbp.md § local-posts | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts/list
+def gbp_list_local_posts(creds, account_name, location_id, page_size=20, as_json=False):
+    """List local posts for a location.
+
+    GET /v4/{parent=accounts/X/locations/Y}/localPosts
+
+    Returns raw API response.
+    """
+    parent = f"{account_name}/locations/{location_id}"
+    return request_json(
+        "GET",
+        f"{GBP_V4_BASE}/{parent}/localPosts",
+        headers=get_bearer_headers(creds),
+        params={"pageSize": page_size},
+        as_json=as_json,
+    )
+
+
+# KB: kb/gbp.md § local-posts | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts/create
+def gbp_create_local_post(creds, account_name, location_id, post_body, as_json=False):
+    """Create a local post for a location.
+
+    POST /v4/{parent=accounts/X/locations/Y}/localPosts
+
+    Args:
+        post_body: LocalPost resource dict (caller provides full body).
+
+    Returns raw API response.
+    """
+    parent = f"{account_name}/locations/{location_id}"
+    return request_json(
+        "POST",
+        f"{GBP_V4_BASE}/{parent}/localPosts",
+        headers=get_bearer_headers(creds),
+        json_body=post_body,
+        as_json=as_json,
+    )
+
+
+# KB: kb/gbp.md § local-posts | https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts/delete
+def gbp_delete_local_post(creds, account_name, location_id, post_id, as_json=False):
+    """Delete a local post.
+
+    DELETE /v4/accounts/{X}/locations/{Y}/localPosts/{postId}
+
+    Returns raw API response.
+    """
+    parent = f"{account_name}/locations/{location_id}"
+    return request_json(
+        "DELETE",
+        f"{GBP_V4_BASE}/{parent}/localPosts/{post_id}",
+        headers=get_bearer_headers(creds),
+        as_json=as_json,
+    )

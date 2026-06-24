@@ -14,11 +14,12 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 
 ## Features
 
-**75 commands** across 15 groups covering the full Google Ads operational surface:
+**108 commands** across 17 groups covering the full Google Ads operational surface:
 
 | Group | Commands | Description |
 |-------|----------|-------------|
-| **Core** | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor` | GAQL queries, local DB reports, campaign snapshots, changelog, account listing |
+| **Core** | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor`, `db`, `changelog`, `decisions`, `milestones`, `catalog`, `mutate`, `batch-mutate` | GAQL queries, local DB reports, campaign snapshots, structured logs, history-DB passthrough, machine-readable command catalog |
+| **Analyze** | `analyze landing-page`, `wasted-spend`, `ngrams`, `ad-copy`, `competition` | Read-only account analysis — landing page scoring, wasted spend, n-gram clusters, ad-copy rule violations, impression-share competitive pressure |
 | **Campaign** | `campaign list`, `status`, `budget`, `perf` | List, enable/pause, change budget, campaign-level metrics from API |
 | **Ad Group** | `adgroup list`, `status`, `create` | List, enable/pause, create ad groups |
 | **Ad** | `ad list`, `status`, `perf` | List ads with creatives, enable/pause, ad-level metrics |
@@ -27,12 +28,13 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 | **Conversion** | `conversion list`, `create`, `set-primary`, `tag`, `perf`, `upload` | Conversion actions, tracking tags, Primary/Secondary toggling, performance by action, offline upload |
 | **Audience** | `audience list`, `create`, `upload`, `job-status` | Customer Match user lists, CSV upload with SHA-256 hashing + consent |
 | **Report** | `report geo`, `hourly`, `devices`, `search-terms` | Geographic, hourly, device, and search term performance breakdowns |
-| **Mutate** | `mutate <type> <json>`, `batch-mutate <json>` | Generic escape hatch for any Google Ads API mutation |
-| **GBP** | `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily` | Google Business Profile management + performance analytics |
-| **GSC** | `gsc sites`, `queries`, `pages`, `performance` | Google Search Console — search queries, pages, daily performance |
-| **Merchant** | `merchant account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center diagnostics — no dev token needed |
-| **GA4** | `ga4 report`, `realtime`, `metadata`, `key-events list/create/bulk/delete` | Google Analytics 4 reporting + key-event (conversion) management — no dev token needed |
+| **GBP** | `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily`, `batch-reviews`, `local-posts`, `create-post`, `delete-post` | Google Business Profile management + performance analytics + local posts CRUD |
+| **GSC** | `gsc sites`, `queries`, `pages`, `performance`, `inspect`, `sitemaps` | Google Search Console — search queries, pages, daily performance, URL Inspection API, sitemaps list |
+| **Merchant** | `merchant account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center (Merchant API v1) — no dev token needed |
+| **GA4** | `ga4 report`, `realtime`, `metadata`, `batch-report`, `pivot-report`, `check-compatibility`, `key-events list/create/bulk/delete` | GA4 Data API + Admin API — reporting, batch/pivot, compatibility check, key-event management |
+| **KB** | `kb check`, `kb list`, `kb show` | API knowledge-base drift check (CI-able), listing, and display |
 | **Auth** | `auth status`, `setup`, `login`, `revoke`, `test` | Interactive setup wizard, OAuth flow, credential diagnostics |
+| **Mutate** | `mutate <type> <json>`, `batch-mutate <json>` | Generic escape hatch for any Google Ads API mutation |
 
 > ★ Requires Standard Access developer token
 
@@ -318,7 +320,7 @@ Click each link → click "ENABLE" (only enable what you need):
 | My Business Account Mgmt API | GBP | [Enable](https://console.cloud.google.com/apis/library/mybusinessaccountmanagement.googleapis.com) |
 | My Business Business Info API | GBP | [Enable](https://console.cloud.google.com/apis/library/mybusinessbusinessinformation.googleapis.com) |
 | My Business v4 (legacy) | GBP reviews | [Enable](https://console.cloud.google.com/apis/library/mybusiness.googleapis.com) |
-| Content API for Shopping | Merchant Center | [Enable](https://console.cloud.google.com/apis/library/content.googleapis.com) |
+| Merchant API v1 (`merchantapi.googleapis.com`) | Merchant Center | [Enable](https://console.cloud.google.com/apis/library/merchantapi.googleapis.com) |
 | GA4 Data API | GA4 | [Enable](https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com) |
 | GA4 Admin API | GA4 | [Enable](https://console.cloud.google.com/apis/library/analyticsadmin.googleapis.com) |
 
@@ -376,23 +378,31 @@ gads-cli/
 ├── gads.sh               # Shell wrapper with .env loading
 ├── gads_lib/
 │   ├── __init__.py       # Version + public API exports
-│   ├── cli.py            # All Click command groups (75 commands)
+│   ├── cli.py            # All Click command groups (108 commands)
 │   ├── config.py         # Scope-aware env config
 │   ├── auth.py           # OAuth credential management
-│   ├── ads.py            # Google Ads REST client + GAQL + mutations
-│   ├── gbp.py            # GBP client (3 base URLs)
-│   ├── merchant.py       # Merchant Center client
-│   ├── ga4.py            # GA4 Data API client
-│   ├── http.py           # HTTP helpers with auth headers
+│   ├── ads.py            # Google Ads REST client + GAQL + mutations (Ads v24)
+│   ├── gbp.py            # GBP client (4 base URLs: account mgmt, business info, legacy v4, performance)
+│   ├── gsc.py            # Search Console client (webmasters/v3 + URL Inspection v1)
+│   ├── merchant.py       # Merchant Center client (Merchant API v1)
+│   ├── ga4.py            # GA4 Data API v1beta + Admin API v1beta
+│   ├── catalog.py        # Live Click-tree catalog emitter
+│   ├── dbread.py         # SELECT-only history-DB passthrough
+│   ├── analyze/          # 5 read-only analysis modules (lp_score, wasted_spend, ngrams, adcopy, competitive)
+│   ├── http.py           # HTTP helpers + graceful error classifier (4-class)
 │   ├── db.py             # SQLite connection manager
-│   ├── output.py         # Table/JSON formatters
+│   ├── output.py         # Table/JSON formatters + classify_api_error + offer_gcloud_enable
 │   └── timeutil.py       # Timezone-aware helpers
+├── kb/                   # API knowledge base (5 md files + INDEX.md + manifest.json)
+├── tests/                # 127 tests (offline/CI-safe)
 ├── fetch_daily.py        # Cron-friendly daily data fetcher
-├── generate_token.py     # OAuth token generator (5 scopes)
+├── generate_token.py     # OAuth token generator (6 scopes incl. webmasters.readonly)
 ├── scripts/install.sh    # Interactive installer
-├── .github/workflows/    # CI pipeline
+├── .github/workflows/    # CI pipeline (Python 3.10-3.13 × Ubuntu + macOS)
 ├── pyproject.toml        # Package metadata
 ├── .env.example          # Configuration template
+├── AGENTS.md             # Agent-driveable capability index
+├── llms.txt              # LLM-optimised quick reference
 ├── CLAUDE.md             # AI agent reference
 ├── CHANGELOG.md          # Version history
 └── README.md

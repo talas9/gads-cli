@@ -25,19 +25,21 @@ python generate_token.py
 | Group | Subcommands | Purpose | Needs dev token? |
 |-------|-----------|---------|-----------------|
 | `auth` | `status`, `setup`, `login`, `revoke`, `test` | Credential management and diagnostics | No |
+| `analyze` | `landing-page`, `wasted-spend`, `ngrams`, `ad-copy`, `competition` | Read-only account analysis (no mutations) | Yes (except `landing-page`) |
 | `campaign` | `list`, `status`, `budget`, `perf` | Campaign management and performance | Yes |
 | `adgroup` | `list`, `status`, `create` | Ad group management | Yes |
 | `ad` | `list`, `status`, `perf` | Ad management and ad-level metrics | Yes |
 | `keyword` | `list`, `add`, `remove`, `negative`, `search-terms`, `ideas`★, `forecast`★ | Keyword research and management | Yes |
 | `asset` | `list`, `sitelink`, `callout`, `call` | Asset management and extensions (two-step creation) | Yes |
-| `conversion` | `list`, `create`, `tag`, `perf`, `upload` | Conversion tracking and offline upload | Yes |
+| `conversion` | `list`, `create`, `set-primary`, `tag`, `perf`, `upload` | Conversion tracking, Primary/Secondary toggling, and offline upload | Yes |
 | `audience` | `list`, `create`, `upload`, `job-status` | Customer Match lists and CSV upload | Yes |
 | `report` | `geo`, `hourly`, `devices`, `search-terms` | Specialized performance breakdowns | Yes |
-| `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily` | Google Business Profile management + performance analytics | No |
-| `gsc` | `sites`, `queries`, `pages`, `performance` | Google Search Console — queries, pages, daily performance | No |
-| `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center product management | No |
-| `ga4` | `report`, `realtime`, `metadata`, `key-events` (`list`/`create`/`bulk`/`delete`) | Google Analytics 4 reporting + key-event (conversion) management | No |
-| Top-level | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor`, `mutate`, `batch-mutate` | GAQL queries, syncing, snapshots, generic mutations | Yes (except `doctor`) |
+| `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily`, `batch-reviews`, `local-posts`, `create-post`, `delete-post` | Google Business Profile management + performance analytics + local posts CRUD | No (except `ads-perf`, `ads-daily`) |
+| `gsc` | `sites`, `queries`, `pages`, `performance`, `inspect`, `sitemaps` | Google Search Console — queries, pages, daily performance, URL Inspection API, sitemaps | No |
+| `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center product management (Merchant API v1) | No |
+| `ga4` | `report`, `realtime`, `metadata`, `batch-report`, `pivot-report`, `check-compatibility`, `key-events` (`list`/`create`/`bulk`/`delete`) | GA4 Data API + Admin API — reporting, batch/pivot, compatibility check, key events | No |
+| `kb` | `check`, `list`, `show` | API knowledge-base drift check (CI-able), listing, and display | No |
+| Top-level | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor`, `catalog`, `db`, `changelog`, `decisions`, `milestones`, `mutate`, `batch-mutate` | GAQL queries, syncing, snapshots, command catalog, history-DB passthrough, generic mutations | Yes (except `doctor`, `catalog`, `db`, `changelog`, `decisions`, `milestones`) |
 
 > ★ Requires Standard Access developer token
 
@@ -122,20 +124,33 @@ GADS_SNAPSHOTS_DIR=snapshots
 gads-cli/
 ├── gads                     # Main CLI entry point (thin shim)
 ├── gads_lib/
-│   ├── cli.py              # Click command groups and entry point
-│   ├── config.py           # Environment-driven configuration
+│   ├── cli.py              # Click command groups and entry point (108 commands)
+│   ├── config.py           # Environment-driven configuration (Ads v24 default)
 │   ├── auth.py             # OAuth credential management + refresh
-│   ├── ads.py              # Google Ads REST client + GAQL runner
+│   ├── ads.py              # Google Ads REST client + GAQL runner (v24)
 │   ├── gbp.py              # GBP client (4 base URLs: account mgmt, business info, legacy v4, performance)
-│   ├── merchant.py         # Merchant Center REST client
-│   ├── ga4.py              # GA4 Data API client
-│   ├── http.py             # HTTP helpers with auth headers
+│   ├── gsc.py              # Search Console client (webmasters/v3 + URL Inspection v1)
+│   ├── merchant.py         # Merchant Center client (Merchant API v1)
+│   ├── ga4.py              # GA4 Data API v1beta + Admin API v1beta
+│   ├── catalog.py          # Live Click-tree catalog emitter (gads catalog --json)
+│   ├── dbread.py           # SELECT-only history-DB passthrough (gads db / changelog / decisions / milestones)
+│   ├── analyze/            # 5 read-only analysis modules
+│   │   ├── lp_score.py     # Landing-page scoring (0-100)
+│   │   ├── wasted_spend.py # Zero-conv + below-avg-CPA spend identification
+│   │   ├── ngrams.py       # 1/2/3-gram search-term clustering (Arabic + English)
+│   │   ├── adcopy.py       # RSA ad copy validation against business rules
+│   │   └── competitive.py  # Impression-share competitive pressure analysis
+│   ├── http.py             # HTTP helpers + graceful error classifier (4 error classes)
 │   ├── db.py               # SQLite connection manager
-│   ├── output.py           # Table/JSON formatting
+│   ├── output.py           # Table/JSON formatting + classify_api_error + offer_gcloud_enable
 │   └── timeutil.py         # Timezone-aware time helpers
+├── kb/                     # API knowledge base (5 API docs + INDEX.md + manifest.json)
+├── tests/                  # 127 tests — offline/CI-safe, covers all service modules
 ├── fetch_daily.py          # Cron-friendly daily data fetcher
-├── generate_token.py       # Interactive OAuth token generator
+├── generate_token.py       # Interactive OAuth token generator (6 scopes)
 ├── pyproject.toml          # Package metadata
+├── AGENTS.md               # Agent-driveable capability index
+├── llms.txt                # LLM-optimised quick reference
 └── README.md, CLAUDE.md    # Documentation
 ```
 
@@ -219,6 +234,27 @@ Each endpoint must use its correct base URL or requests fail.
 ./gads doctor
 ./gads auth status --json
 
+# Agent discovery — always start here
+./gads catalog --json
+
+# History DB (read-only SELECT)
+./gads db "SELECT * FROM campaign_performance ORDER BY date DESC LIMIT 10" --json
+./gads changelog --json -n 20
+./gads decisions --json
+./gads milestones --json
+
+# Analyze (no mutations, safe to run anytime)
+./gads analyze wasted-spend --days 14 --json
+./gads analyze ngrams --days 14
+./gads analyze ad-copy --json
+./gads analyze landing-page --branch qz3
+./gads analyze competition --days 14 --json
+
+# KB drift check (CI-able)
+./gads kb check
+./gads kb list
+./gads kb show google-ads
+
 # Query campaigns
 ./gads query "SELECT campaign.name, campaign.status FROM campaign"
 ./gads campaign list
@@ -257,6 +293,14 @@ Each endpoint must use its correct base URL or requests fail.
 ./gads gbp search-keywords -l 17303088970776446827 --months 3
 ./gads gbp metrics-list
 
+# GBP local posts
+./gads gbp local-posts --account accounts/123456789 --location locations/987654321
+./gads gbp create-post --account accounts/123456789 --location locations/987654321 --summary "Summer sale"
+./gads gbp delete-post accounts/123456789/locations/987654321/localPosts/abc123
+
+# GBP batch reviews
+./gads gbp batch-reviews locations/987654321 locations/111222333
+
 # GBP location asset performance in Google Ads
 ./gads gbp ads-perf -d 30
 ./gads gbp ads-daily -d 14
@@ -266,6 +310,8 @@ Each endpoint must use its correct base URL or requests fail.
 ./gads gsc queries -s "https://shop.talas.ae/" -d 28
 ./gads gsc pages -s "https://shop.talas.ae/" -d 28
 ./gads gsc performance -s "https://shop.talas.ae/" -d 28
+./gads gsc inspect "https://shop.talas.ae/products/tesla" -s "https://shop.talas.ae/"
+./gads gsc sitemaps -s "https://shop.talas.ae/"
 
 # Merchant Center
 ./gads merchant account
@@ -276,6 +322,11 @@ Each endpoint must use its correct base URL or requests fail.
 ./gads ga4 metadata
 ./gads ga4 report --dimensions date,country --metrics activeUsers,sessions --start 7daysAgo
 ./gads ga4 realtime --dimensions city --metrics activeUsers
+
+# GA4 batch and pivot reports
+./gads ga4 batch-report
+./gads ga4 pivot-report --pivot-dimension country --dimensions date --metrics activeUsers
+./gads ga4 check-compatibility --dimensions date,country --metrics activeUsers,sessions
 
 # GA4 key events (conversions). Write ops need analytics.edit scope.
 ./gads ga4 key-events list

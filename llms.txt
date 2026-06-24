@@ -17,4 +17,4 @@ A Google Ads / Google platform CLI built for agent-driven automation.
 
 - Client: Talas Ads (355-285-6345)
 - Manager: 670-695-5825
-- Currency: AED | API version: v23
+- Currency: AED | API version: v24

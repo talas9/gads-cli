@@ -1,6 +1,6 @@
 """Internal library for the gads CLI."""
 
-__version__ = "3.8.2"
+__version__ = "3.9.1"
 
 from .config import (
     PROJECT_ROOT,
@@ -59,6 +59,7 @@ from .merchant import (
     mc_list_datafeeds,
     mc_list_product_statuses,
     mc_list_products,
+    mc_register_gcp,
 )
 from .ga4 import (
     ga4_get_metadata,

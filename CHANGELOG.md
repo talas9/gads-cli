@@ -2,6 +2,53 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.1] - 2026-06-25
+
+### Fixed
+
+- **P0: `ads_mutate()` URL construction — snake_case resource names produced HTTP 404 (HTML) from Google.** The `mutate` CLI escape hatch accepted arbitrary `resource_type` strings (e.g. `campaign_criterion`) and passed them directly into the URL, building paths like `https://googleads.googleapis.com/v24/customers/CID/campaign_criterion:mutate`. Google's REST API requires camelCase plural form (`campaignCriteria`), so any snake_case name hit Google's generic 404 HTML page instead of a JSON API error — completely blocking all account mutations via the escape hatch. Fix: added `_canonicalize_resource()` in `ads.py` with a `_RESOURCE_ALIASES` dict (21 entries, all known mutation resources) that maps snake_case singular → camelCase plural. Unknown snake_case names now raise `ValueError` before any HTTP call (previously they silently 404'd). Canonical camelCase names pass through unchanged — no breakage to typed commands or internal `ads_mutate()` callers.
+
+### Added
+
+- **`_canonicalize_resource()` and `_RESOURCE_ALIASES` in `ads.py`** — public normalization helper (21 alias entries) for use by `ads_mutate()` and any future callers.
+- **6 new pytest tests in `TestAdsMutateUrlConstruction`** covering: `campaign_criterion` → `campaignCriteria` URL, `ad_group_criterion` → `adGroupCriteria` URL, camelCase passthrough, version+customer in URL, unknown-alias `ValueError`, all aliases map to underscore-free camelCase.
+
+### Changed
+
+- Test suite expanded from 217 → 231 tests (all passing).
+- `tests/test_gads.py::TestVersion` updated to assert v3.9.1.
+
+## [3.9.0] - 2026-06-24
+
+### Added
+
+- **7 new `gads analyze` check commands** (`gads_lib/analyze/checks.py`):
+  - `gads analyze rsa-lengths` — flags RSA headlines < 20 chars or descriptions < 60 chars (too-short copy that hurts Ad Strength). Impact: HIGH/MEDIUM/INFO.
+  - `gads analyze rsa-duplicates` — detects intra-RSA duplicate headlines (same text twice in one ad, case-insensitive). Impact: HIGH/INFO.
+  - `gads analyze dki` — reports Dynamic Keyword Insertion (`{keyword:}`) usage or absence across RSA ads. Impact: MEDIUM when absent.
+  - `gads analyze ad-schedule` — checks which active SEARCH campaigns have dayparting rules (campaign_criterion AD_SCHEDULE); flags campaigns serving 24/7. Impact: HIGH/MEDIUM/INFO.
+  - `gads analyze attribution` — checks conversion action attribution models; flags Last-Click usage (recommend DATA_DRIVEN). Impact: HIGH/INFO.
+  - `gads analyze budget-is` — reports `search_budget_lost_impression_share` per SEARCH campaign; flags campaigns > 10%. Impact: HIGH/MEDIUM/INFO. Gracefully handles API sentinel values.
+  - `gads analyze qs-distribution` — Quality Score sub-signal distribution (post-click quality, creative quality / expected CTR, predicted CTR) in ABOVE_AVERAGE/AVERAGE/BELOW_AVERAGE bands, plus overall avg QS and 1-3/4-6/7-10 band breakdown. Impact: HIGH/MEDIUM/INFO.
+
+- **`gads audit` top-level command** — runs the full 12-section structural-compliance audit via `--format md` (default, human-readable) or `--format json` (machine-readable for agents). Wraps `gads analyze audit` as a first-class top-level command. Example: `gads audit --format json --days 14`.
+
+- **43 new offline pytest tests** (`tests/test_checks.py`) covering all 7 check functions:
+  - Empty-response / graceful degradation (no crashes)
+  - Positive cases with correct impact classification
+  - Edge cases (sentinel values, case-insensitive matching, deduplication, partial coverage)
+  - CLI `--help` exit-code-0 for all 9 new commands (7 analyze + audit top-level + format option)
+  - `--json` shape assertions via CliRunner
+
+- **All checks read-only** — only `run_gaql` (SELECT GAQL); no account mutations. Date windows end yesterday (24-48h attribution lag respected).
+
+- **`gads merchant register-gcp`** — registers the caller's GCP OAuth project with a Merchant Center account by calling `POST /accounts/v1/accounts/{account}/developerRegistration:registerGcp`. Fixes the `auth/gcp_unknown` / `GCP_NOT_REGISTERED` error that blocks Merchant API reads when the GCP project has not been associated with the MC account. Uses the existing `content` OAuth scope (no re-auth required). Defaults `--account` to `GOOGLE_MERCHANT_CENTER_ID`. Human-readable and `--json` modes; errors routed through the v3.8.2 error-envelope standard. After success, wait ~5 minutes before retrying merchant commands. KB (`kb/merchant-api.md`) updated with Developer Registration API reference.
+
+### Changed
+
+- Test suite expanded from 174 → 217 tests (all passing).
+- `tests/test_gads.py::TestVersion` updated to assert v3.9.0.
+
 ## [3.8.2] - 2026-06-23
 
 ### Fixed

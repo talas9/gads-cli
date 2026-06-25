@@ -2506,3 +2506,49 @@ This tells Google the product genuinely has no standard identifier, avoiding a `
 This combination (brand + mpn, no gtin) is sufficient for auto parts categories and avoids the identifier-related demotion.
 
 Source: https://support.google.com/merchants/answer/160161
+
+---
+
+## Developer Registration API
+
+### Overview
+
+Some Merchant Center API errors (`auth/gcp_unknown`, `GCP_NOT_REGISTERED`, HTTP 401) indicate the GCP OAuth project has not been registered as an authorised developer for the MC account. The **Developer Registration API** fixes this without any console steps.
+
+### Endpoint
+
+```
+POST https://merchantapi.googleapis.com/accounts/v1/accounts/{account}/developerRegistration:registerGcp
+```
+
+**OAuth scope:** `https://www.googleapis.com/auth/content` (same scope as all other Merchant API calls — no extra scope needed)
+
+**Request body:**
+```json
+{"developerEmail": "developer@example.com"}
+```
+
+**Success response:** Empty object `{}` (HTTP 200).
+
+**Effect:** Associates the GCP project that generated the OAuth token with the MC account. The association propagates in ~5 minutes.
+
+### CLI command
+
+```bash
+gads merchant register-gcp --developer-email admin@talas.ae
+gads merchant register-gcp -e admin@talas.ae --account 12345678 --json
+```
+
+Defaults: `--account` defaults to `GOOGLE_MERCHANT_CENTER_ID` from config.
+
+### When to use
+
+- `gads merchant account` returns HTTP 401 with `GCP_NOT_REGISTERED` in the message
+- `gads merchant status` returns `auth/gcp_unknown` error
+- The GCP project is newly registered or the OAuth client was recently created
+
+### Notes
+
+- One-time setup per GCP project + MC account pair
+- After registration, wait ~5 minutes before retrying merchant commands
+- The `--developer-email` should be the GCP project owner or developer email (the email associated with the GCP project, not necessarily the MC account owner)

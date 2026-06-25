@@ -533,13 +533,13 @@ class TestVersion:
                 f"Version part {part!r} is not numeric in {gads_lib.__version__!r}"
             )
 
-    def test_version_is_3_8_2(self):
-        """gads_lib.__version__ == '3.8.2'."""
+    def test_version_is_3_9_1(self):
+        """gads_lib.__version__ == '3.9.1'."""
         import gads_lib
 
-        assert gads_lib.__version__ == "3.8.2", (
-            f"Expected version 3.8.2, got {gads_lib.__version__!r}. "
-            "Bump __version__ in gads_lib/__init__.py when releasing v3.8.2."
+        assert gads_lib.__version__ == "3.9.1", (
+            f"Expected version 3.9.1, got {gads_lib.__version__!r}. "
+            "Bump __version__ in gads_lib/__init__.py when releasing v3.9.1."
         )
 
 
@@ -1084,6 +1084,123 @@ class TestJsonModeAccessErrors:
         captured = capsys.readouterr()
         assert captured.out == "", f"Expected empty STDOUT in non-JSON mode, got: {captured.out!r}"
         assert captured.err, "Expected human-readable advisory on STDERR in non-JSON mode"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP A — ads.py: mutate URL construction (P0 regression coverage)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAdsMutateUrlConstruction:
+    """ads_mutate — verify correct URL is built for single-resource mutations.
+
+    This class was added after the P0 bug where passing snake_case resource names
+    (e.g. 'campaign_criterion') built a URL with that literal string, resulting in
+    HTTP 404 from Google's servers (HTML error page, not a JSON API error).
+    The fix adds _canonicalize_resource() in ads.py which converts snake_case
+    aliases to camelCase plural REST form before URL construction.
+    """
+
+    def test_snake_case_campaign_criterion_maps_to_campaign_criteria(self, fake_creds):
+        """'campaign_criterion' (snake) must map to 'campaignCriteria' (camelCase plural).
+
+        This is the exact bug that caused HTTP 404: the URL segment was
+        'campaign_criterion:mutate' instead of 'campaignCriteria:mutate'.
+        """
+        from gads_lib.ads import ads_mutate
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_mutate(fake_creds, "campaign_criterion", [{"remove": "customers/1/campaignCriteria/1~2"}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "campaignCriteria:mutate" in called_url, (
+            f"URL must contain 'campaignCriteria:mutate' not 'campaign_criterion:mutate', got: {called_url}"
+        )
+        assert "campaign_criterion" not in called_url, (
+            f"URL must NOT contain snake_case 'campaign_criterion', got: {called_url}"
+        )
+        assert "googleads.googleapis.com" in called_url
+        assert "v24" in called_url
+
+    def test_snake_case_ad_group_criterion_maps_to_ad_group_criteria(self, fake_creds):
+        """'ad_group_criterion' (snake) must map to 'adGroupCriteria'."""
+        from gads_lib.ads import ads_mutate
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_mutate(fake_creds, "ad_group_criterion", [{"remove": "customers/1/adGroupCriteria/1~2"}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "adGroupCriteria:mutate" in called_url, (
+            f"Expected 'adGroupCriteria:mutate' in URL, got: {called_url}"
+        )
+        assert "ad_group_criterion" not in called_url
+
+    def test_camelcase_passthrough_campaign_criteria(self, fake_creds):
+        """Passing the canonical 'campaignCriteria' (camelCase) must pass through unchanged."""
+        from gads_lib.ads import ads_mutate
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_mutate(fake_creds, "campaignCriteria", [{"remove": "customers/1/campaignCriteria/1~2"}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "campaignCriteria:mutate" in called_url
+        assert "campaign_criterion" not in called_url
+
+    def test_mutate_url_contains_version_and_customer(self, fake_creds):
+        """ads_mutate URL must embed API_VERSION and CUSTOMER_ID (not be a generic path)."""
+        from gads_lib.ads import ads_mutate
+        import os
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_mutate(fake_creds, "campaigns", [{"create": {"name": "test"}}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "googleads.googleapis.com" in called_url, "URL must target googleads.googleapis.com"
+        # API version segment must be present (v24 or whatever API_VERSION is)
+        from gads_lib.config import API_VERSION, CUSTOMER_ID
+        assert API_VERSION in called_url, f"URL must contain API version '{API_VERSION}', got: {called_url}"
+        assert CUSTOMER_ID in called_url, f"URL must contain customer ID '{CUSTOMER_ID}', got: {called_url}"
+        assert ":mutate" in called_url, "URL must end with ':mutate' action"
+
+    def test_unknown_snake_resource_raises_value_error(self):
+        """An unrecognized snake_case resource name raises ValueError before any HTTP call."""
+        from gads_lib.ads import _canonicalize_resource
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="Unknown resource alias"):
+            _canonicalize_resource("totally_unknown_resource")
+
+    def test_canonicalize_all_known_aliases_return_camelcase(self):
+        """Every entry in _RESOURCE_ALIASES maps to a camelCase (no underscore) value."""
+        from gads_lib.ads import _RESOURCE_ALIASES
+
+        for alias, canonical in _RESOURCE_ALIASES.items():
+            assert "_" not in canonical, (
+                f"Alias '{alias}' maps to '{canonical}' which still contains underscores — "
+                f"must be camelCase plural"
+            )
+            assert canonical[0].islower(), (
+                f"Alias '{alias}' maps to '{canonical}' which does not start lowercase"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2399,6 +2516,126 @@ class TestMcListProductStatuses:
 
         assert "products" in result
         assert result["products"][0]["offerId"] == "SKU-001"
+
+
+class TestMcRegisterGcp:
+    """mc_register_gcp — POST to developerRegistration:registerGcp."""
+
+    def _fake_ok_resp(self):
+        """Minimal HTTP 200 response with empty body (API acks with {})."""
+        r = MagicMock()
+        r.status_code = 200
+        r.text = "{}"
+        r.json.return_value = {}
+        return r
+
+    def test_post_method(self, fake_creds):
+        """mc_register_gcp uses POST, not GET."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="admin@example.com")
+
+        assert mock_req.call_args[0][0] == "POST"
+
+    def test_url_contains_developer_registration(self, fake_creds):
+        """URL path includes developerRegistration:registerGcp."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="admin@example.com")
+
+        called_url = mock_req.call_args[0][1]
+        assert "developerRegistration:registerGcp" in called_url
+        assert "merchantapi.googleapis.com" in called_url
+
+    def test_url_uses_configured_account(self, fake_creds):
+        """URL embeds the configured MERCHANT_CENTER_ID (88887777 from conftest env)."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="admin@example.com")
+
+        called_url = mock_req.call_args[0][1]
+        assert "88887777" in called_url
+
+    def test_url_uses_explicit_account(self, fake_creds):
+        """When account_id is passed, it overrides the configured ID."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="admin@example.com",
+                            account_id="99999999")
+
+        called_url = mock_req.call_args[0][1]
+        assert "99999999" in called_url
+
+    def test_request_body_contains_developer_email(self, fake_creds):
+        """POST body is {"developerEmail": email}."""
+        from gads_lib.merchant import mc_register_gcp
+
+        with patch("requests.request", return_value=self._fake_ok_resp()) as mock_req:
+            mc_register_gcp(fake_creds, developer_email="dev@company.com")
+
+        _, kwargs = mock_req.call_args
+        body = kwargs.get("json") or {}
+        assert body.get("developerEmail") == "dev@company.com"
+
+    def test_error_envelope_on_403(self, fake_creds, capsys):
+        """as_json=True routes 403 through the JSON error envelope and exits 5."""
+        from gads_lib.merchant import mc_register_gcp
+
+        error_body = json.dumps({
+            "error": {
+                "code": 403,
+                "status": "PERMISSION_DENIED",
+                "message": "GCP project not authorized",
+            }
+        })
+        fake_resp = MagicMock()
+        fake_resp.status_code = 403
+        fake_resp.text = error_body
+
+        with patch("requests.request", return_value=fake_resp):
+            with pytest.raises(SystemExit) as exc_info:
+                mc_register_gcp(fake_creds, developer_email="admin@example.com", as_json=True)
+
+        assert exc_info.value.code == 5
+        out = capsys.readouterr().out
+        envelope = json.loads(out)
+        assert "error" in envelope
+
+    def test_cli_help_exits_0(self):
+        """gads merchant register-gcp --help exits 0."""
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["merchant", "register-gcp", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "register" in result.output.lower()
+        assert "--developer-email" in result.output
+
+    def test_cli_json_output_on_success(self, fake_creds, capsys):
+        """gads merchant register-gcp --json emits status:registered JSON."""
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        runner = CliRunner()
+        with patch("gads_lib.cli.get_credentials", return_value=fake_creds), \
+             patch("gads_lib.cli.mc_register_gcp", return_value={}):
+            result = runner.invoke(
+                cli,
+                ["merchant", "register-gcp",
+                 "--developer-email", "admin@talas.ae",
+                 "--json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert parsed["status"] == "registered"
+        assert parsed["developer_email"] == "admin@talas.ae"
+        assert "next_step" in parsed
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

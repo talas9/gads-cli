@@ -70,6 +70,7 @@ from gads_lib import (
     mc_list_datafeeds,
     mc_list_product_statuses,
     mc_list_products,
+    mc_register_gcp,
     now_local,
     print_json,
     print_table,
@@ -1733,6 +1734,62 @@ def merchant_returns(as_json):
              "days": (p.get("policy") or {}).get("days", (p.get("policy") or {}).get("numberOfDays",""))} for p in policies]
     print_table(rows, ["name", "country", "label", "days"])
 
+
+@merchant.command("register-gcp")
+@click.option("--developer-email", "-e", required=True,
+              help="Email address of the GCP project developer to register with the Merchant account.")
+@click.option("--account", "account_id", default=None,
+              help="Merchant Center account ID (default: MERCHANT_CENTER_ID from config).")
+@click.option("--json", "as_json", is_flag=True)
+def merchant_register_gcp(developer_email, account_id, as_json):
+    """Register the GCP project with a Merchant Center account (fixes GCP_NOT_REGISTERED errors).
+
+    Calls POST /accounts/v1/accounts/{account}/developerRegistration:registerGcp
+    with {"developerEmail": EMAIL}.  This resolves the auth/gcp_unknown error
+    that blocks merchant API reads when your GCP OAuth project has not been
+    associated with the MC account.
+
+    \\b
+    Examples:
+      gads merchant register-gcp --developer-email admin@example.com
+      gads merchant register-gcp -e admin@example.com --account 12345678 --json
+
+    After success: wait ~5 minutes before retrying merchant commands.
+    This is a one-time setup step per GCP project + MC account pair.
+    """
+    enforce_allowed_caller()
+    creds = get_credentials()
+    effective_account = account_id or MERCHANT_CENTER_ID
+    if not effective_account:
+        if as_json:
+            print_json({"error": {"code": "VALIDATION", "message": "No Merchant Center account ID — set GOOGLE_MERCHANT_CENTER_ID or pass --account."}})
+        else:
+            click.secho("  Error: No Merchant Center account ID configured.", fg="red")
+            click.echo("  Set GOOGLE_MERCHANT_CENTER_ID in your .env or pass --account ACCOUNT_ID.")
+        raise SystemExit(EXIT_CODES["VALIDATION"])
+
+    data = mc_register_gcp(creds, developer_email=developer_email,
+                           account_id=effective_account, as_json=as_json)
+
+    if as_json:
+        # Success: emit the API response + metadata
+        return print_json({
+            "status": "registered",
+            "account": effective_account,
+            "developer_email": developer_email,
+            "response": data,
+            "next_step": "Wait ~5 minutes then retry merchant commands.",
+        })
+
+    # Human-readable success
+    click.secho("\n  GCP project registered with Merchant Center account.", fg="green", bold=True)
+    click.echo(f"  Account:          {effective_account}")
+    click.echo(f"  Developer email:  {developer_email}")
+    click.secho("\n  Next step: wait ~5 minutes, then retry:", fg="yellow")
+    click.echo("    gads merchant account")
+    click.echo("    gads merchant status")
+
+
 # ── GA4 commands ─────────────────────────────────────────────
 
 @ga4.command("metadata")
@@ -3238,6 +3295,294 @@ def analyze_competition_cmd(days, top, as_json):
     from gads_lib.analyze.competitive import analyze_competitive, render_competitive
     result = analyze_competitive(get_credentials(), days=days, top=max(top, 50))
     render_competitive(result, as_json=as_json, top=top)
+
+
+@analyze.command("audit")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_audit_cmd(days, as_json):
+    """12-section structural-compliance audit: scoring 0/50/100 per section, weighted overall.
+
+    Checks: RSA headline/description length, intra-ad duplicate headlines,
+    ad strength, DKI presence, ad schedule, attribution model, budget-lost IS,
+    Quality Score distribution, negative keyword coverage, primary conversion
+    action, and sitelink coverage.
+    """
+    from gads_lib.analyze.audit import analyze_audit, render_audit
+    result = analyze_audit(get_credentials(), days=days)
+    render_audit(result, as_json=as_json)
+
+
+@analyze.command("rsa-lengths")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_rsa_lengths_cmd(days, as_json):
+    """Flag RSA headlines < 20 chars or descriptions < 60 chars (too-short copy).
+
+    Short ad copy reduces ad strength and relevance signals. This check identifies
+    headlines and descriptions that are below the recommended minimum length.
+    """
+    from gads_lib.analyze.checks import check_rsa_lengths
+    result = check_rsa_lengths(get_credentials(), days=days)
+    if as_json:
+        return print_json(result)
+    import click as _click
+    w = result["window"]
+    _click.secho(
+        f"\nRSA length check — {w['from']} → {w['to']} ({w['days']}d)  "
+        f"impact: {result['impact']}",
+        fg="yellow", bold=True,
+    )
+    _click.echo(
+        f"  {result['total_ads']} ads  |  "
+        f"{result['total_headlines']} headlines  |  "
+        f"{result['total_descriptions']} descriptions"
+    )
+    if result["short_headlines"]:
+        _click.secho(f"\nShort headlines ({len(result['short_headlines'])}):", fg="red", bold=True)
+        print_table(result["short_headlines"][:20], ["ad_id", "campaign", "headline", "length"])
+    else:
+        _click.secho("\nNo short headlines found.", fg="green")
+    if result["short_descriptions"]:
+        _click.secho(f"\nShort descriptions ({len(result['short_descriptions'])}):", fg="red", bold=True)
+        print_table(result["short_descriptions"][:20], ["ad_id", "campaign", "description", "length"])
+    else:
+        _click.secho("No short descriptions found.", fg="green")
+
+
+@analyze.command("rsa-duplicates")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_rsa_duplicates_cmd(days, as_json):
+    """Detect intra-RSA duplicate headlines (same text twice in one ad, case-insensitive).
+
+    Duplicate headlines within an RSA waste a slot and reduce message diversity,
+    lowering ad strength. This check flags any such ads.
+    """
+    from gads_lib.analyze.checks import check_rsa_duplicates
+    result = check_rsa_duplicates(get_credentials(), days=days)
+    if as_json:
+        return print_json(result)
+    import click as _click
+    w = result["window"]
+    _click.secho(
+        f"\nRSA duplicate-headline check — {w['from']} → {w['to']} ({w['days']}d)  "
+        f"impact: {result['impact']}",
+        fg="yellow", bold=True,
+    )
+    _click.echo(f"  {result['total_ads']} ads checked  |  {result['count_affected']} with duplicates")
+    if result["ads_with_duplicates"]:
+        _click.secho(f"\nAds with duplicate headlines:", fg="red", bold=True)
+        rows = [
+            {
+                "ad_id": ad["ad_id"],
+                "campaign": ad["campaign"][:30],
+                "ad_group": ad["ad_group"][:20],
+                "duplicates": ", ".join(ad["duplicate_headlines"][:3]),
+            }
+            for ad in result["ads_with_duplicates"][:20]
+        ]
+        print_table(rows, ["ad_id", "campaign", "ad_group", "duplicates"])
+    else:
+        _click.secho("\nNo intra-RSA duplicate headlines found.", fg="green")
+
+
+@analyze.command("dki")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_dki_cmd(days, as_json):
+    """Check for Dynamic Keyword Insertion ({KeyWord:} syntax) in RSA ads.
+
+    DKI dynamically replaces the placeholder with the user's search query,
+    improving ad relevance for Search campaigns. This check reports usage (or absence).
+    """
+    from gads_lib.analyze.checks import check_dki_presence
+    result = check_dki_presence(get_credentials(), days=days)
+    if as_json:
+        return print_json(result)
+    import click as _click
+    w = result["window"]
+    _click.secho(
+        f"\nDKI presence check — {w['from']} → {w['to']} ({w['days']}d)  "
+        f"impact: {result['impact']}",
+        fg="yellow", bold=True,
+    )
+    _click.echo(f"  {result['total_ads_checked']} ads checked  |  DKI found: {result['dki_found']}")
+    if result["ads_with_dki"]:
+        _click.secho(f"\nAds using DKI ({len(result['ads_with_dki'])}):", fg="green", bold=True)
+        print_table(result["ads_with_dki"][:10], ["ad_id", "campaign", "snippet"])
+    else:
+        _click.secho(f"\n{result['recommendation']}", fg="yellow")
+
+
+@analyze.command("ad-schedule")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_ad_schedule_cmd(days, as_json):
+    """Check ad-schedule criteria coverage per active SEARCH campaign.
+
+    Campaigns without ad schedules serve ads 24/7, which can waste budget in
+    off-hours. This check flags campaigns missing dayparting rules.
+    """
+    from gads_lib.analyze.checks import check_ad_schedule
+    result = check_ad_schedule(get_credentials(), days=days)
+    if as_json:
+        return print_json(result)
+    import click as _click
+    w = result["window"]
+    _click.secho(
+        f"\nAd-schedule check — {w['from']} → {w['to']} ({w['days']}d)  "
+        f"impact: {result['impact']}",
+        fg="yellow", bold=True,
+    )
+    _click.echo(
+        f"  {result['scheduled_campaigns']}/{result['total_search_campaigns']} SEARCH campaigns "
+        f"have ad schedules ({result['coverage_pct']:.1f}%)"
+    )
+    if result["unscheduled_campaigns"]:
+        _click.secho("\nCampaigns missing ad schedule:", fg="red", bold=True)
+        for name in result["unscheduled_campaigns"][:20]:
+            _click.echo(f"  - {name}")
+    else:
+        _click.secho("\nAll active SEARCH campaigns have ad schedules.", fg="green")
+
+
+@analyze.command("attribution")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_attribution_cmd(as_json):
+    """Check conversion-action attribution models; flag Last-Click usage.
+
+    Last-Click attribution under-credits upper-funnel touchpoints. Data-Driven
+    attribution is recommended when the account has ≥300 conversions/month.
+    """
+    from gads_lib.analyze.checks import check_attribution_model
+    result = check_attribution_model(get_credentials())
+    if as_json:
+        return print_json(result)
+    import click as _click
+    _click.secho(
+        f"\nConversion attribution check  impact: {result['impact']}",
+        fg="yellow", bold=True,
+    )
+    _click.echo(
+        f"  {result['total_conversion_actions']} enabled conversion actions  |  "
+        f"Last-Click: {len(result['last_click_actions'])}  |  "
+        f"Data-Driven/Other: {len(result['data_driven_actions']) + len(result['other_actions'])}"
+    )
+    if result["last_click_actions"]:
+        _click.secho("\nLast-Click conversion actions (recommend switching):", fg="red", bold=True)
+        print_table(result["last_click_actions"][:10], ["name", "model"])
+    _click.echo(f"\n  {result['recommendation']}")
+
+
+@analyze.command("budget-is")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_budget_is_cmd(days, as_json):
+    """Report campaign budget-lost impression share for SEARCH campaigns.
+
+    search_budget_lost_impression_share shows the fraction of auctions missed
+    due to insufficient budget. > 10% signals under-budgeting.
+    """
+    from gads_lib.analyze.checks import check_budget_lost_is
+    result = check_budget_lost_is(get_credentials(), days=days)
+    if as_json:
+        return print_json(result)
+    import click as _click
+    w = result["window"]
+    avg = result.get("avg_budget_lost_is_pct")
+    _click.secho(
+        f"\nBudget-lost IS check — {w['from']} → {w['to']} ({w['days']}d)  "
+        f"impact: {result['impact']}",
+        fg="yellow", bold=True,
+    )
+    _click.echo(
+        f"  Avg budget-lost IS: {avg:.1f}%  |  "
+        f"Flagged campaigns (>10%): {result['flagged_count']}"
+        if avg is not None
+        else "  No data available in window"
+    )
+    if result["campaigns"]:
+        print_table(result["campaigns"][:20], ["name", "budget_lost_is_pct", "flag"])
+
+
+@analyze.command("qs-distribution")
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--json", "as_json", is_flag=True)
+def analyze_qs_distribution_cmd(days, as_json):
+    """Quality Score sub-signal distribution across keywords (post-click, creative, predicted CTR).
+
+    Shows the % of keywords in ABOVE_AVERAGE / AVERAGE / BELOW_AVERAGE bands for
+    each QS sub-signal, plus overall average QS and band distribution.
+    """
+    from gads_lib.analyze.checks import check_qs_distribution
+    result = check_qs_distribution(get_credentials(), days=days)
+    if as_json:
+        return print_json(result)
+    import click as _click
+    w = result["window"]
+    avg_qs = result.get("avg_qs")
+    _click.secho(
+        f"\nQuality Score distribution — {w['from']} → {w['to']} ({w['days']}d)  "
+        f"impact: {result['impact']}",
+        fg="yellow", bold=True,
+    )
+    _click.echo(
+        f"  {result['total_keywords']} unique keywords  |  "
+        f"Avg QS: {avg_qs:.2f}" if avg_qs is not None
+        else f"  {result['total_keywords']} unique keywords  |  Avg QS: N/A"
+    )
+    qs_dist = result.get("qs_distribution", {})
+    _click.echo(
+        f"  QS bands — 1-3: {qs_dist.get('1-3', 0)}  "
+        f"4-6: {qs_dist.get('4-6', 0)}  "
+        f"7-10: {qs_dist.get('7-10', 0)}"
+    )
+    sub = result.get("sub_signals", {})
+    if sub:
+        _click.secho("\nSub-signal distribution:", fg="white", bold=True)
+        rows = []
+        label_map = {
+            "post_click": "Post-Click Quality",
+            "creative": "Creative Quality (CTR)",
+            "predicted_ctr": "Predicted CTR",
+        }
+        for key, label in label_map.items():
+            s = sub.get(key, {})
+            rows.append({
+                "signal": label,
+                "ABOVE_AVG": s.get("ABOVE_AVERAGE", 0),
+                "AVERAGE": s.get("AVERAGE", 0),
+                "BELOW_AVG": s.get("BELOW_AVERAGE", 0),
+                "UNKNOWN": s.get("UNKNOWN", 0),
+            })
+        print_table(rows, ["signal", "ABOVE_AVG", "AVERAGE", "BELOW_AVG", "UNKNOWN"])
+
+
+# ── Top-level audit command (alias to analyze audit) ─────────────
+
+@cli.command()
+@click.option("--days", "-d", type=int, default=30, help="Lookback window (ends yesterday).")
+@click.option("--format", "fmt", type=click.Choice(["md", "json"]), default="md",
+              help="Output format: md (human-readable markdown) or json.")
+def audit(days, fmt):
+    """12-section structural-compliance audit with weighted scoring.
+
+    Runs all compliance checks (RSA lengths, duplicate headlines, DKI, ad schedule,
+    attribution model, budget-lost IS, Quality Score, negative keywords, conversions,
+    sitelinks) and produces an overall score (0-100) + grade (A-F).
+
+    \\b
+    Examples:
+      gads audit                   # Human-readable report, 30-day window
+      gads audit --days 14         # Shorter window
+      gads audit --format json     # Machine-readable JSON for agents
+      gads audit --format md       # Explicit human-readable mode
+    """
+    from gads_lib.analyze.audit import analyze_audit, render_audit
+    result = analyze_audit(get_credentials(), days=days)
+    as_json = fmt == "json"
+    render_audit(result, as_json=as_json)
 
 
 # ── Catalog (machine-readable command manifest) ─────────────

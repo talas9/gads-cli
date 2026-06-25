@@ -184,3 +184,42 @@ def mc_get_return_policy(creds, as_json=False):
         params=params,
         as_json=as_json,
     )
+
+
+# KB: kb/merchant-api.md § developer-registration
+def mc_register_gcp(creds, developer_email: str, account_id: str | None = None,
+                    as_json: bool = False):
+    """Register the caller's GCP project with a Merchant Center account.
+
+    Calls the Developer Registration API:
+      POST /accounts/v1/accounts/{account}/developerRegistration:registerGcp
+    with body {"developerEmail": developer_email}.
+
+    This resolves the ``auth/gcp_unknown`` / ``GCP_NOT_REGISTERED`` error that
+    occurs when a GCP project has not been explicitly associated with the MC
+    account.  After a successful registration, wait ~5 minutes before retrying
+    merchant API calls.
+
+    Args:
+        creds:            OAuth credentials (scope: content).
+        developer_email:  Email address of the GCP project developer to register.
+        account_id:       Merchant Center account ID (default: MERCHANT_CENTER_ID
+                          from config).
+        as_json:          Route errors through the JSON error envelope (--json mode).
+
+    Returns:
+        The raw API response dict on success.  On error, behaviour depends on
+        ``as_json`` — see ``request_json`` error routing.
+
+    Response shape:
+        On success the API returns an empty object ``{}`` or a simple ack.
+        The CLI prints a success message with next steps.
+    """
+    account = account_id or MERCHANT_CENTER_ID
+    return request_json(
+        "POST",
+        f"{MA_ACCOUNTS}/accounts/{account}/developerRegistration:registerGcp",
+        headers=get_bearer_headers(creds),
+        json_body={"developerEmail": developer_email},
+        as_json=as_json,
+    )

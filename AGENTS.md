@@ -81,6 +81,51 @@ tools/gads <command> [SUBCOMMAND] [OPTIONS]
 gads-cli/gads <command> [SUBCOMMAND] [OPTIONS]
 ```
 
+## Merchant Center Developer Registration
+
+Fix `auth/gcp_unknown` / `GCP_NOT_REGISTERED` errors without console steps:
+
+```bash
+tools/gads merchant register-gcp --developer-email admin@talas.ae
+tools/gads merchant register-gcp -e admin@talas.ae --account 12345678 --json
+```
+
+After success, wait ~5 minutes then retry merchant commands. One-time per GCP project + MC account pair.
+
+## Read-Only Analysis Commands
+
+All analysis and audit commands are safe to run at any time — they make no account mutations.
+
+**Gap checks (v3.9.0+):**
+
+```bash
+# RSA copy quality
+tools/gads analyze rsa-lengths --days 30 --json    # headlines < 20 or descriptions < 60 chars
+tools/gads analyze rsa-duplicates --days 30 --json  # intra-ad duplicate headlines
+
+# Ad copy intelligence
+tools/gads analyze dki --days 30 --json             # Dynamic Keyword Insertion usage/absence
+tools/gads analyze ad-schedule --days 30 --json     # SEARCH campaigns missing ad schedule
+
+# Account health
+tools/gads analyze attribution --json               # Last-Click attribution flag
+tools/gads analyze budget-is --days 30 --json       # search_budget_lost_impression_share > 10%
+tools/gads analyze qs-distribution --days 30 --json # QS sub-signal band distribution
+```
+
+**Structural compliance audit:**
+
+```bash
+# Top-level shorthand (recommended)
+tools/gads audit                         # Human-readable 12-section audit (30d window)
+tools/gads audit --days 14 --format json # Machine-readable JSON for agents
+
+# Equivalent (as analyze subcommand)
+tools/gads analyze audit --days 30 --json
+```
+
+The audit produces `overall_score` (0-100), `grade` (A-F), and per-section scores (0/50/100) for 12 compliance dimensions. Use `--format json` in agent pipelines.
+
 ## KB Version Drift Rule
 
 **When you bump an API or SDK version, you MUST also update:**

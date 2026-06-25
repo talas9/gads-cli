@@ -13,6 +13,67 @@ from .http import request_json
 from .output import EXIT_CODES, classify_api_error
 
 
+# Canonical mapping: snake_case aliases → Google Ads REST camelCase plural resource names.
+# The REST API requires camelCase plural (e.g. "campaignCriteria"), NOT snake_case singular
+# (e.g. "campaign_criterion"). Passing the wrong form produces HTTP 404 from Google's servers
+# (HTML error page, not a JSON API error) — which is the P0 bug this map fixes.
+# Keep this list sorted; add new entries as resources are added to the CLI.
+_RESOURCE_ALIASES: dict[str, str] = {
+    # snake_case singular → camelCase plural (REST endpoint segment)
+    "ad_group": "adGroups",
+    "ad_group_ad": "adGroupAds",
+    "ad_group_bid_modifier": "adGroupBidModifiers",
+    "ad_group_criterion": "adGroupCriteria",
+    "ad_group_feed": "adGroupFeeds",
+    "asset": "assets",
+    "campaign": "campaigns",
+    "campaign_asset": "campaignAssets",
+    "campaign_bid_modifier": "campaignBidModifiers",
+    "campaign_budget": "campaignBudgets",
+    "campaign_criterion": "campaignCriteria",
+    "campaign_feed": "campaignFeeds",
+    "conversion_action": "conversionActions",
+    "customer_negative_criterion": "customerNegativeCriteria",
+    "feed": "feeds",
+    "feed_item": "feedItems",
+    "keyword_plan": "keywordPlans",
+    "label": "labels",
+    "remarketing_action": "remarketingActions",
+    "shared_criterion": "sharedCriteria",
+    "shared_set": "sharedSets",
+    "user_list": "userLists",
+}
+
+
+def _canonicalize_resource(resource_path: str) -> str:
+    """Normalize a resource path segment to the Google Ads REST camelCase plural form.
+
+    Accepts either the canonical form (passthrough) or snake_case aliases from
+    _RESOURCE_ALIASES. Raises ValueError if the input is not recognized.
+
+    Examples:
+        "campaignCriteria"     → "campaignCriteria"  (passthrough, already canonical)
+        "campaign_criterion"   → "campaignCriteria"  (alias → canonical)
+        "adGroupCriteria"      → "adGroupCriteria"   (passthrough)
+        "ad_group_criterion"   → "adGroupCriteria"   (alias → canonical)
+    """
+    # Already canonical (camelCase or any known non-alias form) — check alias table first
+    canonical = _RESOURCE_ALIASES.get(resource_path)
+    if canonical:
+        return canonical
+    # If it contains an underscore and wasn't found in the alias table, it's an unknown alias —
+    # reject it with a clear message rather than silently building a 404 URL.
+    if "_" in resource_path:
+        known = ", ".join(sorted(_RESOURCE_ALIASES.keys()))
+        raise ValueError(
+            f"Unknown resource alias '{resource_path}'. "
+            f"Use the camelCase plural REST form (e.g. 'campaignCriteria') "
+            f"or one of the known aliases: {known}"
+        )
+    # Assume caller passed the camelCase form directly — pass through unchanged.
+    return resource_path
+
+
 def get_ads_headers(creds):
     return {
         "Authorization": f"Bearer {creds.token}",
@@ -83,17 +144,22 @@ def ads_search(creds, query):
 # KB: kb/google-ads.md § mutate | https://developers.google.com/google-ads/api/docs/rest/reference/rest/v24/customers/mutate
 def ads_mutate(creds, resource_path, operations):
     """Single-resource mutate operation.
-    
+
     POST to /{resource_path}:mutate with {"operations": operations}
+    resource_path is canonicalized via _canonicalize_resource() so that callers
+    may pass either the camelCase plural REST form ("campaignCriteria") or a
+    snake_case alias ("campaign_criterion") — both route to the correct URL.
+    Passing an unknown snake_case alias raises ValueError before any HTTP call.
     Returns response JSON.
     """
+    canonical = _canonicalize_resource(resource_path)
     url = (
         f"https://googleads.googleapis.com/{API_VERSION}"
-        f"/customers/{CUSTOMER_ID}/{resource_path}:mutate"
+        f"/customers/{CUSTOMER_ID}/{canonical}:mutate"
     )
     headers = get_ads_headers(creds)
     payload = {"operations": operations}
-    
+
     return request_json("POST", url, headers=headers, json_body=payload)
 
 

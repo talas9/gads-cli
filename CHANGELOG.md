@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.9.1] - 2026-06-25
+
+### Fixed
+
+- **P0: `ads_mutate()` URL construction — snake_case resource names produced HTTP 404 (HTML) from Google.** The `mutate` CLI escape hatch accepted arbitrary `resource_type` strings (e.g. `campaign_criterion`) and passed them directly into the URL, building paths like `https://googleads.googleapis.com/v24/customers/CID/campaign_criterion:mutate`. Google's REST API requires camelCase plural form (`campaignCriteria`), so any snake_case name hit Google's generic 404 HTML page instead of a JSON API error — completely blocking all account mutations via the escape hatch. Fix: added `_canonicalize_resource()` in `ads.py` with a `_RESOURCE_ALIASES` dict (21 entries, all known mutation resources) that maps snake_case singular → camelCase plural. Unknown snake_case names now raise `ValueError` before any HTTP call (previously they silently 404'd). Canonical camelCase names pass through unchanged — no breakage to typed commands or internal `ads_mutate()` callers.
+
+### Added
+
+- **`_canonicalize_resource()` and `_RESOURCE_ALIASES` in `ads.py`** — public normalization helper (21 alias entries) for use by `ads_mutate()` and any future callers.
+- **6 new pytest tests in `TestAdsMutateUrlConstruction`** covering: `campaign_criterion` → `campaignCriteria` URL, `ad_group_criterion` → `adGroupCriteria` URL, camelCase passthrough, version+customer in URL, unknown-alias `ValueError`, all aliases map to underscore-free camelCase.
+
+### Changed
+
+- Test suite expanded from 217 → 231 tests (all passing).
+- `tests/test_gads.py::TestVersion` updated to assert v3.9.1.
+
 ## [3.9.0] - 2026-06-24
 
 ### Added

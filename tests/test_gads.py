@@ -533,13 +533,13 @@ class TestVersion:
                 f"Version part {part!r} is not numeric in {gads_lib.__version__!r}"
             )
 
-    def test_version_is_3_9_0(self):
-        """gads_lib.__version__ == '3.9.0'."""
+    def test_version_is_3_9_1(self):
+        """gads_lib.__version__ == '3.9.1'."""
         import gads_lib
 
-        assert gads_lib.__version__ == "3.9.0", (
-            f"Expected version 3.9.0, got {gads_lib.__version__!r}. "
-            "Bump __version__ in gads_lib/__init__.py when releasing v3.9.0."
+        assert gads_lib.__version__ == "3.9.1", (
+            f"Expected version 3.9.1, got {gads_lib.__version__!r}. "
+            "Bump __version__ in gads_lib/__init__.py when releasing v3.9.1."
         )
 
 
@@ -1084,6 +1084,123 @@ class TestJsonModeAccessErrors:
         captured = capsys.readouterr()
         assert captured.out == "", f"Expected empty STDOUT in non-JSON mode, got: {captured.out!r}"
         assert captured.err, "Expected human-readable advisory on STDERR in non-JSON mode"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP A — ads.py: mutate URL construction (P0 regression coverage)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAdsMutateUrlConstruction:
+    """ads_mutate — verify correct URL is built for single-resource mutations.
+
+    This class was added after the P0 bug where passing snake_case resource names
+    (e.g. 'campaign_criterion') built a URL with that literal string, resulting in
+    HTTP 404 from Google's servers (HTML error page, not a JSON API error).
+    The fix adds _canonicalize_resource() in ads.py which converts snake_case
+    aliases to camelCase plural REST form before URL construction.
+    """
+
+    def test_snake_case_campaign_criterion_maps_to_campaign_criteria(self, fake_creds):
+        """'campaign_criterion' (snake) must map to 'campaignCriteria' (camelCase plural).
+
+        This is the exact bug that caused HTTP 404: the URL segment was
+        'campaign_criterion:mutate' instead of 'campaignCriteria:mutate'.
+        """
+        from gads_lib.ads import ads_mutate
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_mutate(fake_creds, "campaign_criterion", [{"remove": "customers/1/campaignCriteria/1~2"}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "campaignCriteria:mutate" in called_url, (
+            f"URL must contain 'campaignCriteria:mutate' not 'campaign_criterion:mutate', got: {called_url}"
+        )
+        assert "campaign_criterion" not in called_url, (
+            f"URL must NOT contain snake_case 'campaign_criterion', got: {called_url}"
+        )
+        assert "googleads.googleapis.com" in called_url
+        assert "v24" in called_url
+
+    def test_snake_case_ad_group_criterion_maps_to_ad_group_criteria(self, fake_creds):
+        """'ad_group_criterion' (snake) must map to 'adGroupCriteria'."""
+        from gads_lib.ads import ads_mutate
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_mutate(fake_creds, "ad_group_criterion", [{"remove": "customers/1/adGroupCriteria/1~2"}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "adGroupCriteria:mutate" in called_url, (
+            f"Expected 'adGroupCriteria:mutate' in URL, got: {called_url}"
+        )
+        assert "ad_group_criterion" not in called_url
+
+    def test_camelcase_passthrough_campaign_criteria(self, fake_creds):
+        """Passing the canonical 'campaignCriteria' (camelCase) must pass through unchanged."""
+        from gads_lib.ads import ads_mutate
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_mutate(fake_creds, "campaignCriteria", [{"remove": "customers/1/campaignCriteria/1~2"}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "campaignCriteria:mutate" in called_url
+        assert "campaign_criterion" not in called_url
+
+    def test_mutate_url_contains_version_and_customer(self, fake_creds):
+        """ads_mutate URL must embed API_VERSION and CUSTOMER_ID (not be a generic path)."""
+        from gads_lib.ads import ads_mutate
+        import os
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"results": []})
+        fake_resp.json.return_value = {"results": []}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            ads_mutate(fake_creds, "campaigns", [{"create": {"name": "test"}}])
+
+        called_url = mock_req.call_args[0][1]
+        assert "googleads.googleapis.com" in called_url, "URL must target googleads.googleapis.com"
+        # API version segment must be present (v24 or whatever API_VERSION is)
+        from gads_lib.config import API_VERSION, CUSTOMER_ID
+        assert API_VERSION in called_url, f"URL must contain API version '{API_VERSION}', got: {called_url}"
+        assert CUSTOMER_ID in called_url, f"URL must contain customer ID '{CUSTOMER_ID}', got: {called_url}"
+        assert ":mutate" in called_url, "URL must end with ':mutate' action"
+
+    def test_unknown_snake_resource_raises_value_error(self):
+        """An unrecognized snake_case resource name raises ValueError before any HTTP call."""
+        from gads_lib.ads import _canonicalize_resource
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="Unknown resource alias"):
+            _canonicalize_resource("totally_unknown_resource")
+
+    def test_canonicalize_all_known_aliases_return_camelcase(self):
+        """Every entry in _RESOURCE_ALIASES maps to a camelCase (no underscore) value."""
+        from gads_lib.ads import _RESOURCE_ALIASES
+
+        for alias, canonical in _RESOURCE_ALIASES.items():
+            assert "_" not in canonical, (
+                f"Alias '{alias}' maps to '{canonical}' which still contains underscores — "
+                f"must be camelCase plural"
+            )
+            assert canonical[0].islower(), (
+                f"Alias '{alias}' maps to '{canonical}' which does not start lowercase"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

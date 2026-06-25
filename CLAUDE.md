@@ -25,7 +25,8 @@ python generate_token.py
 | Group | Subcommands | Purpose | Needs dev token? |
 |-------|-----------|---------|-----------------|
 | `auth` | `status`, `setup`, `login`, `revoke`, `test` | Credential management and diagnostics | No |
-| `analyze` | `landing-page`, `wasted-spend`, `ngrams`, `ad-copy`, `competition` | Read-only account analysis (no mutations) | Yes (except `landing-page`) |
+| `audit` | *(top-level)* `[--days N] [--format md\|json]` | 12-section structural-compliance audit — `overall_score` (0-100), `grade` (A-F), per-section scores; wraps `analyze audit` | Yes |
+| `analyze` | `landing-page`, `wasted-spend`, `ngrams`, `ad-copy`, `competition`, `rsa-lengths`, `rsa-duplicates`, `dki`, `ad-schedule`, `attribution`, `budget-is`, `qs-distribution`, `audit` | Read-only account analysis (no mutations) — 5 original + 7 gap checks + full audit | Yes (except `landing-page`) |
 | `campaign` | `list`, `status`, `budget`, `perf` | Campaign management and performance | Yes |
 | `adgroup` | `list`, `status`, `create` | Ad group management | Yes |
 | `ad` | `list`, `status`, `perf` | Ad management and ad-level metrics | Yes |
@@ -36,7 +37,7 @@ python generate_token.py
 | `report` | `geo`, `hourly`, `devices`, `search-terms` | Specialized performance breakdowns | Yes |
 | `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily`, `batch-reviews`, `local-posts`, `create-post`, `delete-post` | Google Business Profile management + performance analytics + local posts CRUD | No (except `ads-perf`, `ads-daily`) |
 | `gsc` | `sites`, `queries`, `pages`, `performance`, `inspect`, `sitemaps` | Google Search Console — queries, pages, daily performance, URL Inspection API, sitemaps | No |
-| `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center product management (Merchant API v1) | No |
+| `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns`, `register-gcp` | Merchant Center product management (Merchant API v1); `register-gcp` fixes GCP_NOT_REGISTERED (one-time setup) | No |
 | `ga4` | `report`, `realtime`, `metadata`, `batch-report`, `pivot-report`, `check-compatibility`, `key-events` (`list`/`create`/`bulk`/`delete`) | GA4 Data API + Admin API — reporting, batch/pivot, compatibility check, key events | No |
 | `kb` | `check`, `list`, `show` | API knowledge-base drift check (CI-able), listing, and display | No |
 | Top-level | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor`, `catalog`, `db`, `changelog`, `decisions`, `milestones`, `mutate`, `batch-mutate` | GAQL queries, syncing, snapshots, command catalog, history-DB passthrough, generic mutations | Yes (except `doctor`, `catalog`, `db`, `changelog`, `decisions`, `milestones`) |

@@ -14,12 +14,13 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 
 ## Features
 
-**108 commands** across 17 groups covering the full Google Ads operational surface:
+**115 commands** across 18 groups covering the full Google Ads operational surface:
 
 | Group | Commands | Description |
 |-------|----------|-------------|
 | **Core** | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor`, `db`, `changelog`, `decisions`, `milestones`, `catalog`, `mutate`, `batch-mutate` | GAQL queries, local DB reports, campaign snapshots, structured logs, history-DB passthrough, machine-readable command catalog |
-| **Analyze** | `analyze landing-page`, `wasted-spend`, `ngrams`, `ad-copy`, `competition` | Read-only account analysis — landing page scoring, wasted spend, n-gram clusters, ad-copy rule violations, impression-share competitive pressure |
+| **Audit** | `audit [--days N] [--format md\|json]` | Top-level 12-section structural-compliance audit (0-100 score, A-F grade); wraps `analyze audit` |
+| **Analyze** | `analyze landing-page`, `wasted-spend`, `ngrams`, `ad-copy`, `competition`, `rsa-lengths`, `rsa-duplicates`, `dki`, `ad-schedule`, `attribution`, `budget-is`, `qs-distribution`, `audit` | Read-only account analysis — landing page scoring, wasted spend, n-gram clusters, ad-copy rule violations, impression-share competitive pressure, 7 gap checks, full compliance audit |
 | **Campaign** | `campaign list`, `status`, `budget`, `perf` | List, enable/pause, change budget, campaign-level metrics from API |
 | **Ad Group** | `adgroup list`, `status`, `create` | List, enable/pause, create ad groups |
 | **Ad** | `ad list`, `status`, `perf` | List ads with creatives, enable/pause, ad-level metrics |
@@ -30,7 +31,7 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 | **Report** | `report geo`, `hourly`, `devices`, `search-terms` | Geographic, hourly, device, and search term performance breakdowns |
 | **GBP** | `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily`, `batch-reviews`, `local-posts`, `create-post`, `delete-post` | Google Business Profile management + performance analytics + local posts CRUD |
 | **GSC** | `gsc sites`, `queries`, `pages`, `performance`, `inspect`, `sitemaps` | Google Search Console — search queries, pages, daily performance, URL Inspection API, sitemaps list |
-| **Merchant** | `merchant account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center (Merchant API v1) — no dev token needed |
+| **Merchant** | `merchant account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns`, `register-gcp` | Merchant Center (Merchant API v1) — no dev token needed; `register-gcp` fixes GCP_NOT_REGISTERED |
 | **GA4** | `ga4 report`, `realtime`, `metadata`, `batch-report`, `pivot-report`, `check-compatibility`, `key-events list/create/bulk/delete` | GA4 Data API + Admin API — reporting, batch/pivot, compatibility check, key-event management |
 | **KB** | `kb check`, `kb list`, `kb show` | API knowledge-base drift check (CI-able), listing, and display |
 | **Auth** | `auth status`, `setup`, `login`, `revoke`, `test` | Interactive setup wizard, OAuth flow, credential diagnostics |

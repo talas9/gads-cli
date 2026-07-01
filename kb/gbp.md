@@ -7,20 +7,25 @@ The Google Business Profile (GBP) API suite was restructured in late 2021/early 
 
 | API | Current Version | Status | Notes |
 |---|---|---|---|
-| My Business Account Management API | v1 | Active | Replaced v4 account management |
-| My Business Business Information API | v1 | Active | Replaced v4 location data |
-| Business Profile Performance API | v1 | Active | Replaced deprecated v4 Insights endpoints |
+| My Business Account Management API | **v1.1** (bumped from v1; REST path is still `/v1/`) | Active | Replaced v4 account management. v1.1 added `locations.admins` (location-level admin management), `placeId` on pending invitations, and renamed `toAccount`→`destinationAccount` on `locations.transfer`. Source: https://developers.google.com/my-business/content/accountmanagement/change-log |
+| My Business Business Information API | v1 | Active | Replaced v4 location data. No `v1.1`+ change-log entries as of July 2026 — unchanged since original migration. |
+| Business Profile Performance API | v1 | Active | Replaced deprecated v4 Insights endpoints. No new change-log entries as of July 2026. |
 | Google My Business API (legacy) | v4 | Partially active | Reviews + Posts still here; most other resources sunset |
-| My Business Business Calls API | — | **Sunset** | Discontinued May 30, 2023 |
+| Business Calls API (`mybusinessbusinesscalls.googleapis.com`) | v1 | **Deprecated** (whole resource tree, incl. `businesscallsinsights`) | Confirmed still deprecated as of July 2026 — do not implement |
+| My Business Verifications API (`mybusinessverifications.googleapis.com`) | v1 | Active (out of current scope for Talas) | Holds `getVoiceOfMerchantState`/suspension fields that used to live in Business Information's `LocationState` (now folded into `metadata` + this API). Not implemented in gads-cli; noted for completeness. |
 
 **Legacy v4 sunset history** (source: https://developers.google.com/my-business/content/sunset-dates):
 - `accounts.locations.reportInsights` — discontinued March 30, 2023
 - `accounts.locations.localPosts.reportInsights` — discontinued February 20, 2023
 - `accounts.locations.getHealthProviderAttributes` / `updateHealthProviderAttributes` / `insuranceNetworks` — discontinued July 1, 2024
-- **Reviews endpoints** (`list`, `get`, `updateReply`, `deleteReply`) — **NOT sunset, still active as of June 2026**
+- `mybusinessbusinesscalls.googleapis.com` (My Business Business Calls API) — discontinued May 30, 2023; re-verified still fully deprecated (every method in the nav tree, including `businesscallsinsights.list`) as of July 2026
+- `accounts.locations.admins` (legacy v4 location-admin management) — now marked **Deprecated** in the official nav; superseded by `locations.admins` on the v1.1 Account Management API (see below)
+- **Reviews endpoints** (`list`, `get`, `updateReply`, `deleteReply`) — **NOT sunset, still active as of July 2026**
 
 The reviews and local posts endpoints remain on `mybusiness.googleapis.com/v4` with no announced sunset date
-as of June 2026. Google has indicated these will migrate to v1 "eventually" but has not committed to a timeline.
+as of July 2026. Google has indicated these will migrate to v1 "eventually" but has not committed to a timeline.
+The `batchGetReviews` v4 method (see Coverage gaps below) is marked **"new"** in Google's own nav, not deprecated —
+still a safe implementation target.
 
 ---
 
@@ -58,7 +63,7 @@ Sources:
 
 | API | Host | Version | Status | Purpose |
 |---|---|---|---|---|
-| My Business Account Management API | `mybusinessaccountmanagement.googleapis.com` | v1 | Active | Manage accounts, admins, invitations |
+| My Business Account Management API | `mybusinessaccountmanagement.googleapis.com` | v1.1 (docs revision; path still `/v1/`) | Active | Manage accounts, account-level + location-level admins, invitations, location transfer |
 | My Business Business Information API | `mybusinessbusinessinformation.googleapis.com` | v1 | Active | CRUD on locations, attributes, categories |
 | Business Profile Performance API | `businessprofileperformance.googleapis.com` | v1 | Active | Daily metric time series, search keyword impressions |
 | Google My Business API (legacy) | `mybusiness.googleapis.com` | v4 | Partially active | Reviews, local posts (no v1 replacements yet) |
@@ -76,10 +81,14 @@ Sources:
 | Account Mgmt | accounts.admins | list | GET | `/v1/{parent=accounts/*}/admins` | List admins for an account | https://developers.google.com/my-business/reference/accountmanagement/rest |
 | Account Mgmt | accounts.admins | create | POST | `/v1/{parent=accounts/*}/admins` | Add admin to account | https://developers.google.com/my-business/reference/accountmanagement/rest |
 | Account Mgmt | accounts.admins | delete | DELETE | `/v1/{name=accounts/*/admins/*}` | Remove admin | https://developers.google.com/my-business/reference/accountmanagement/rest |
-| Account Mgmt | accounts.invitations | list | GET | `/v1/{parent=accounts/*}/invitations` | List pending invitations | https://developers.google.com/my-business/reference/accountmanagement/rest |
+| Account Mgmt | accounts.invitations | list | GET | `/v1/{parent=accounts/*}/invitations` | List pending invitations (response `Invitation.targetLocation.placeId` added in v1.1) | https://developers.google.com/my-business/reference/accountmanagement/rest/v1/accounts.invitations/list |
 | Account Mgmt | accounts.invitations | accept | POST | `/v1/{name=accounts/*/invitations/*}:accept` | Accept invitation | https://developers.google.com/my-business/reference/accountmanagement/rest |
 | Account Mgmt | accounts.invitations | decline | POST | `/v1/{name=accounts/*/invitations/*}:decline` | Decline invitation | https://developers.google.com/my-business/reference/accountmanagement/rest |
-| Account Mgmt | locations | transfer | POST | `/v1/{name=locations/*}:transfer` | Transfer location to another account | https://developers.google.com/my-business/reference/accountmanagement/rest |
+| Account Mgmt | locations | transfer | POST | `/v1/{name=locations/*}:transfer` | Transfer location to another account; body field is `destinationAccount` (v1.1 rename of `toAccount`) | https://developers.google.com/my-business/reference/accountmanagement/rest/v1/locations/transfer |
+| Account Mgmt | locations.admins | list | GET | `/v1/{parent=locations/*}/admins` | List admins for a **location** — **new in v1.1** | https://developers.google.com/my-business/reference/accountmanagement/rest/v1/locations.admins/list |
+| Account Mgmt | locations.admins | create | POST | `/v1/{parent=locations/*}/admins` | Invite an admin for a location — **new in v1.1** | https://developers.google.com/my-business/reference/accountmanagement/rest/v1/locations.admins/create |
+| Account Mgmt | locations.admins | patch | PATCH | `/v1/{locationAdmin.name=locations/*/admins/*}` | Update a location admin — **new in v1.1** | https://developers.google.com/my-business/reference/accountmanagement/rest/v1/locations.admins/patch |
+| Account Mgmt | locations.admins | delete | DELETE | `/v1/{name=locations/*/admins/*}` | Remove a location admin — **new in v1.1** | https://developers.google.com/my-business/reference/accountmanagement/rest/v1/locations.admins/delete |
 | Business Info | accounts.locations | list | GET | `/v1/{parent=accounts/*}/locations` | List locations for account (readMask required) | https://developers.google.com/my-business/reference/businessinformation/rest/v1/accounts.locations/list |
 | Business Info | accounts.locations | create | POST | `/v1/{parent=accounts/*}/locations` | Create a new location | https://developers.google.com/my-business/reference/businessinformation/rest |
 | Business Info | locations | get | GET | `/v1/{name=locations/*}` | Get single location (readMask required) | https://developers.google.com/my-business/reference/businessinformation/rest |
@@ -173,12 +182,21 @@ Authorization: Bearer ya29.a0AfH6...
 
 **Account object fields:**
 
+> **CORRECTION (verified July 2026 against the live `AccountRole` enum reference):** the current
+> `role` enum has **no `CO_OWNER` value**. The real values are `ACCOUNT_ROLE_UNSPECIFIED`,
+> `PRIMARY_OWNER`, `OWNER`, `MANAGER`, `SITE_MANAGER`. `CO_OWNER` and `COMMUNITY_MANAGER` were the
+> **legacy v4 names**, renamed to `OWNER`/`PRIMARY_OWNER` and `SITE_MANAGER` respectively when the
+> account moved to v1 (`OWNER`→`PRIMARY_OWNER`, `CO_OWNER`→`OWNER`, `COMMUNITY_MANAGER`→`SITE_MANAGER`).
+> An earlier version of this doc still listed the legacy v4 names for the v1 API — that was wrong.
+> Source: https://developers.google.com/my-business/reference/accountmanagement/rest/v1/accounts#AccountRole
+> (rename history: https://developers.google.com/my-business/content/accountmanagement/change-log)
+
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | Resource name: `accounts/{accountId}` |
 | `accountName` | string | Display name of the account |
 | `type` | enum | `PERSONAL`, `LOCATION_GROUP`, `USER_GROUP`, `ORGANIZATION` |
-| `role` | enum | Authenticated user's role: `OWNER`, `CO_OWNER`, `MANAGER`, `SITE_MANAGER` |
+| `role` | enum | Authenticated user's role: `ACCOUNT_ROLE_UNSPECIFIED`, `PRIMARY_OWNER`, `OWNER`, `MANAGER`, `SITE_MANAGER` (no `CO_OWNER` — see correction above) |
 | `verificationState` | enum | `VERIFIED`, `UNVERIFIED`, `VERIFICATION_REQUESTED` |
 | `vettedState` | enum | `IS_VETTED`, `NOT_VETTED`, `IS_VETTED_UNCONFIRMED` |
 
@@ -331,7 +349,7 @@ Source: https://developers.google.com/my-business/reference/businessinformation/
 
 **Base URL:** `https://mybusiness.googleapis.com`
 
-> **v4 LEGACY — still the only way to access reviews as of June 2026. No v1 replacement exists.**
+> **v4 LEGACY — still the only way to access reviews as of July 2026. No v1 replacement exists.**
 
 **Full URL:**
 ```
@@ -452,7 +470,7 @@ Source: https://developers.google.com/my-business/reference/rest/v4/accounts.loc
 
 **Base URL:** `https://mybusiness.googleapis.com`
 
-> **v4 LEGACY — still the only way to reply to reviews as of June 2026.**
+> **v4 LEGACY — still the only way to reply to reviews as of July 2026.**
 
 **Full URL:**
 ```
@@ -711,7 +729,7 @@ Local posts appear on the Google Business Profile in Google Search and Maps resu
 All localPosts endpoints are on the legacy v4 API — `mybusiness.googleapis.com/v4`.
 
 > **Note:** `localPosts.reportInsights` was discontinued February 20, 2023. Do not implement it.
-> All other localPosts methods (create, list, get, patch, delete) remain active as of June 2026.
+> All other localPosts methods (create, list, get, patch, delete) remain active as of July 2026.
 
 ### POST /v4/{locationName}/localPosts — Create Post
 
@@ -989,7 +1007,7 @@ Resource: `Account`
 | `name` | string | Resource name: `accounts/{accountId}` |
 | `accountName` | string | Display name of the account |
 | `type` | enum | `PERSONAL`, `LOCATION_GROUP`, `USER_GROUP`, `ORGANIZATION` |
-| `role` | enum | Authenticated user's role: `OWNER`, `CO_OWNER`, `MANAGER`, `SITE_MANAGER` |
+| `role` | enum | Authenticated user's role: `ACCOUNT_ROLE_UNSPECIFIED`, `PRIMARY_OWNER`, `OWNER`, `MANAGER`, `SITE_MANAGER` — no `CO_OWNER` (see correction under the `accounts.list` section above) |
 | `verificationState` | enum | Verification status |
 | `vettedState` | enum | Vetting status |
 
@@ -1031,7 +1049,7 @@ Source: https://developers.google.com/my-business/reference/businessinformation/
 
 ### Reviews (v4 legacy — still active)
 
-The reviews endpoints live at `mybusiness.googleapis.com/v4`. There is no v1 replacement as of June 2026.
+The reviews endpoints live at `mybusiness.googleapis.com/v4`. There is no v1 replacement as of July 2026.
 See the Concrete Endpoint Reference sections above for full request/response examples.
 
 ### Performance Metrics
@@ -1102,7 +1120,7 @@ Sources:
    list of field names you need.
 
 2. **Reviews are stuck on v4** — `mybusiness.googleapis.com/v4` for reviews is still the only way
-   to list/reply to reviews. There is no v1 reviews API as of June 2026. The gads-cli correctly uses
+   to list/reply to reviews. There is no v1 reviews API as of July 2026. The gads-cli correctly uses
    v4 for reviews. Do not try to migrate to v1 — no such endpoint exists yet.
 
 3. **Local posts are also stuck on v4** — same situation as reviews. The `localPosts` resource
@@ -1170,34 +1188,43 @@ The current `gads_lib/gbp.py` uses these endpoints:
 | Local posts — list | v4 | GET | `/v4/{location}/localPosts` | pageSize max 100 |
 | Local posts — update | v4 | PATCH | `/v4/{localPost}?updateMask=...` | updateMask required |
 | Local posts — delete | v4 | DELETE | `/v4/{localPost}` | No body |
-| Batch get reviews | v4 | POST | `/v4/{account}/locations:batchGetReviews` | Multi-location review fetch |
+| Batch get reviews | v4 | POST | `/v4/{account}/locations:batchGetReviews` | Multi-location review fetch, max 50 locations/call; marked "new" (not deprecated) in Google's nav |
 | Business attributes | Business Info v1 | GET | `/v1/{location}/attributes` | Hours, accessibility, amenities |
 | Account admins | Account Mgmt v1 | GET | `/v1/{account}/admins` | Who has access to each account |
+| **Location admins** (new in v1.1) | Account Mgmt v1 | GET/POST/PATCH/DELETE | `/v1/{location}/admins` | Who has access to each *location* directly (as opposed to account-level admins); supersedes deprecated v4 `accounts.locations.admins` |
 | Location categories | Business Info v1 | GET | `/v1/categories` | Enumerate valid categories |
 | Google-suggested updates | Business Info v1 | GET | `/v1/{location}:getGoogleUpdated` | See what Google has auto-changed |
+| Voice-of-merchant / suspension state | Verifications v1 (`mybusinessverifications.googleapis.com`) | GET | `/v1/{location}:getVoiceOfMerchantState` | Replaces old v4 `LocationState` fields; not currently used by gads-cli |
 
 ---
 
 ## Sources
 
-All claims in this document are sourced from the following URLs, fetched June 2026:
+All claims in this document are sourced from the following URLs, fetched July 2026:
 
-- https://developers.google.com/my-business/reference/accountmanagement/rest — Account Management API reference
+- https://developers.google.com/my-business/reference/accountmanagement/rest — Account Management API reference (confirms v1.1, `locations.admins` resource)
 - https://developers.google.com/my-business/reference/accountmanagement/rest/v1/accounts/list — accounts.list details
+- https://developers.google.com/my-business/reference/accountmanagement/rest/v1/accounts#AccountRole — live `AccountRole` enum: `ACCOUNT_ROLE_UNSPECIFIED`, `PRIMARY_OWNER`, `OWNER`, `MANAGER`, `SITE_MANAGER` (no `CO_OWNER`)
+- https://developers.google.com/my-business/content/accountmanagement/change-log — v1.1 change log (`destinationAccount`, invitation `placeId`, legacy role-name rename table); last updated 2026-05-13
 - https://developers.google.com/my-business/reference/businessinformation/rest — Business Information API reference
 - https://developers.google.com/my-business/reference/businessinformation/rest/v1/accounts.locations/list — accounts.locations.list details
+- https://developers.google.com/my-business/content/businessinformation/change-log — confirms no `v1.1`+ entries as of July 2026; documents `locations.getVoiceOfMerchantState` migration to Verifications API
 - https://developers.google.com/my-business/reference/performance/rest — Performance API reference
 - https://developers.google.com/my-business/reference/performance/rest/v1/locations/fetchMultiDailyMetricsTimeSeries — fetchMultiDailyMetricsTimeSeries details
 - https://developers.google.com/my-business/reference/performance/rest/v1/locations/getDailyMetricsTimeSeries — getDailyMetricsTimeSeries details
-- https://developers.google.com/my-business/reference/performance/rest/v1/DailyMetric — Complete DailyMetric enum values
+- https://developers.google.com/my-business/reference/performance/rest/v1/DailyMetric — Complete DailyMetric enum values; unchanged, last updated 2024-10-16
+- https://developers.google.com/my-business/content/performance/change-log — confirms no new entries as of July 2026
 - https://developers.google.com/my-business/reference/rest — Legacy v4 API reference (reviews, posts)
 - https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/list — reviews.list details
 - https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/updateReply — updateReply details
+- https://developers.google.com/my-business/reference/rest/v4/accounts.locations/batchGetReviews — confirms `batchGetReviews` is marked "new", not deprecated
 - https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts — localPosts resource overview
 - https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts/create — localPosts.create details
 - https://developers.google.com/my-business/reference/rest/v4/accounts.locations.localPosts/list — localPosts.list details
 - https://developers.google.com/my-business/content/review-data — Reviews API working guide
-- https://developers.google.com/my-business/content/sunset-dates — Deprecation and sunset schedule
+- https://developers.google.com/my-business/content/sunset-dates — Deprecation and sunset schedule; last updated 2025-08-28, no new entries since
+- https://developers.google.com/my-business/reference/businesscalls/rest — Business Calls API; re-verified fully deprecated (nav-wide "Deprecated" markers) as of July 2026
+- https://developers.google.com/my-business/reference/verifications/rest — My Business Verifications API (`mybusinessverifications.googleapis.com`, v1) — `getVoiceOfMerchantState`, `fetchVerificationOptions`, `verify`
 - https://xovionlabs.com/blog/google-business-profile-api-hidden-gate/ — API access approval gate details
 
 ---
@@ -1557,7 +1584,7 @@ Source: https://developers.google.com/my-business/reference/businessinformation/
 ### 5. Reviews Workflow
 
 All reviews endpoints are on the **legacy v4 API** at `mybusiness.googleapis.com`. There is no
-v1 replacement as of June 2026.
+v1 replacement as of July 2026.
 
 #### List Reviews (with Pagination)
 
@@ -2295,7 +2322,24 @@ GET https://mybusinessbusinessinformation.googleapis.com/v1/{name=locations/*}:g
     ?readMask=name,title,phoneNumbers,categories,storefrontAddress
 ```
 
+**Suspension / "voice of merchant" state lives in a separate API (not `metadata`):** the legacy v4
+`LocationState` object (which used to carry suspension and detailed verification fields) was removed
+during the original v1 migration. Most of its fields moved into Business Information's `metadata`
+(the flags above), but the detailed suspension/voice-of-merchant fields moved to a dedicated
+**My Business Verifications API** (`mybusinessverifications.googleapis.com`, v1 — not currently used
+by gads-cli):
+```
+GET https://mybusinessverifications.googleapis.com/v1/{name=locations/*}/VoiceOfMerchantState
+```
+Also on that API: `locations.fetchVerificationOptions` and `locations.verify` (start a verification).
+Not implemented in the CLI as of July 2026 — Talas locations are already verified, so this is low
+priority, but reach for this API (not Business Information) if a "why can't I mutate this location"
+question turns out to be a suspension/voice-of-merchant problem rather than a plain `VERIFIED`/
+`UNVERIFIED` one.
+
 Sources:
 - https://developers.google.com/my-business/reference/businessinformation/rest/v1/locations/patch
 - https://developers.google.com/my-business/reference/businessinformation/rest/v1/locations/getGoogleUpdated
 - https://developers.google.com/my-business/reference/performance/rest/v1/locations/fetchMultiDailyMetricsTimeSeries
+- https://developers.google.com/my-business/reference/verifications/rest — Verifications API (voice-of-merchant/suspension state)
+- https://developers.google.com/my-business/content/businessinformation/change-log — documents the `LocationState` → `metadata` + Verifications API split

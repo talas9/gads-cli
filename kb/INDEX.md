@@ -51,3 +51,12 @@ Each KB file now contains both an **endpoint reference** section and a comprehen
 
 - **Google Ads sunset-dates table:** the page exists but the dates table content was not extractable from the fetch — marked `(unverified)` in google-ads.md.
 - All other version/status claims were confirmed against the cited doc URLs on 2026-06-23.
+
+## Sister tool
+
+This `gads-cli/kb/` is the Google-side counterpart of **[`mads-cli/kb/`](../../mads-cli/kb/INDEX.md)**
+— the same documentation-sourced, source-cited knowledge-base convention applied to Meta
+(Facebook/Instagram) Ads: Marketing API, Graph API (Business Manager/Pages/Webhooks), Conversions
+API (CAPI), and Commerce Manager Catalog, instead of Google Ads/GA4/GBP/Merchant Center/Search
+Console. Consult `mads-cli/kb/` for Meta-side APIs; this directory is Google-only. Sister CLI:
+https://github.com/talas9/mads-cli

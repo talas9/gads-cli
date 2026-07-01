@@ -425,6 +425,21 @@ claude "Pull fresh data and compare this week vs last week"
 
 ---
 
+## Sister tool
+
+For **Meta (Facebook/Instagram) Ads** — Marketing API campaigns/ad sets/ads/creatives, Business
+Manager, Conversions API (CAPI), and Commerce Manager — see the sister CLI **mads-cli**:
+https://github.com/talas9/mads-cli
+
+`mads-cli` shares the same architecture conventions as `gads-cli` — scope-aware config, `--json`/
+`--plain`/`--quiet`, structured error envelope + stable exit codes, `snapshot → mutate → log`
+discipline, `catalog --json` self-description, and read-only `db`/`changelog`/`decisions`/
+`milestones` history access. If you manage both Google Ads and Meta Ads for the same business,
+both CLIs can share a single history DB (their `changelog` tables use identical column names), and
+`gads doctor` reports whether `mads` is installed via a `sibling_cli` field (and vice versa).
+
+---
+
 ## Contributing
 
 1. Fork → feature branch → make changes

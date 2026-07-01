@@ -4,21 +4,46 @@
 
 | Version | Status | Notes |
 |---------|--------|-------|
-| v1 | **GA (stable)** | Current production version. Use this. |
+| v1 | **GA (stable)** | Current production version. Use this. No v2 exists — Merchant API versions each sub-API independently rather than bumping one global version number (confirmed via versioning guide, checked 2026-07-01). |
 | v1beta | **Discontinued** | Shut down February 28, 2026. Do not use. |
-| v1alpha | Experimental | Unstable surface; not for production. |
+| v1alpha | Experimental | Unstable surface; up to 30-day breaking-change notice per the versioning guide. Not for production. |
 
 The Merchant API is a redesign of the legacy Content API for Shopping.
 
+- **Merchant API v1 reached General Availability: August 18, 2025** (corrected — a prior version of this doc said "2024", which was wrong).
+  (Sources: https://support.google.com/merchants/answer/16493611?hl=en — "Merchant API is now generally available", dated August 2025; corroborated by contemporaneous press coverage of the Aug 18, 2025 GA announcement, e.g. https://www.searchenginejournal.com/google-makes-merchant-api-generally-available-whats-new/554011/)
 - **Content API for Shopping (v2.1) sunset date: August 18, 2026**
-  (Source: https://developers.google.com/shopping-content/guides/quickstart — "Content API for Shopping will be sunset on August 18, 2026")
+  (Source: https://developers.google.com/shopping-content/guides/quickstart — "Content API for Shopping will be sunset on August 18, 2026" — re-verified 2026-07-01, unchanged)
 - **v1beta discontinued: February 28, 2026**
-  (Source: https://developers.google.com/merchant/api/overview — "Merchant API v1beta was discontinued and shut down on February 28, 2026")
+  (Source: https://developers.google.com/merchant/api/overview — "Merchant API v1beta was discontinued and shut down on February 28, 2026" — re-verified 2026-07-01, unchanged)
+- **No v2 of any sub-API has shipped.** Per the versioning guide, a major bump (v1→v2) would only signal a backward-incompatible break; as of 2026-07-01 every stable sub-API is still at v1.
+  (Source: https://developers.google.com/merchant/api/guides/versioning)
 
 Sources:
 - https://developers.google.com/merchant/api/overview
 - https://developers.google.com/merchant/api/reference/rest
 - https://developers.google.com/shopping-content/guides/quickstart
+- https://developers.google.com/merchant/api/guides/versioning
+- https://developers.google.com/merchant/api/latest-updates
+- https://support.google.com/merchants/answer/16493611?hl=en
+
+
+## Recent Interface Changes (checked 2026-07-01)
+
+Nothing found changes the endpoints gads-cli already implements (accounts, products read, dataSources, shippingSettings, onlineReturnPolicies) — the items below are additive surface that has appeared since this doc's previous fetch (2026-06-23) and across the preceding months, per the "Latest updates" page. None are integrated into gads-cli yet; several are new entries for the Gaps table further down.
+
+| Area | Change | Status |
+|------|--------|--------|
+| Accounts sub-API | New method `accounts.developerRegistration.getAccountForGcpRegistration` — looks up which Merchant Center account a given GCP project is registered to (the read-side companion to the `registerGcp` write already documented below under "Developer Registration API"). | Confirmed to exist (Source: https://developers.google.com/merchant/api/reference/rest/accounts_v1/accounts.developerRegistration/getAccountForGcpRegistration). Exact REST path unverified — the doc renders as nav-only via automated fetch; likely `GET accounts/v1/accounts:getAccountForGcpRegistration` (custom method on the collection, not a specific account, since the whole point is you don't know the account yet) but confirm against the live discovery doc before coding against it. (unverified path) |
+| Accounts sub-API — Regions | New `batchCreate`, `batchUpdate`, `batchDelete` methods for `accounts.regions` (added ~September 2025). | (unverified detail — found via search summary of release notes, not a fetched schema page) |
+| Products sub-API | New "conversational" `productAttributes` fields added ~May 2026 — Google's release notes describe additions covering Q&A, document links, related products, item-group title, variant option, and popularity rank. | (unverified exact field names — could not load the live `ProductAttributes` schema page to confirm camelCase spellings; treat names as directional until confirmed against `products_v1/ProductAttributes`) |
+| Products sub-API | Vehicle-specific attribute set added to `productAttributes` (~May 2026), for vehicle-ads use cases. | Not applicable to Talas (parts catalog, not vehicle listings) — noted for completeness only. (unverified detail) |
+| Products sub-API | `productInputs.patch` gaining lower-latency, more-frequent price/availability updates for allowlisted merchants (~May 2026). | (unverified — allowlist-gated, not general availability) |
+| Notifications sub-API | New reporting-context enum value `FREE_LISTINGS_UCP_CHECKOUT` (Universal Commerce Protocol checkout). | (unverified — found via search summary only) |
+| Reviews sub-API | In addition to the existing `reviews/v1beta`, a `v1alpha` surface now exists for enabling/disabling the Product Reviews program. | (unverified — could not independently confirm against a schema page) |
+| New agentic surface | A Merchant API **MCP (Model Context Protocol) service, alpha**, offering read-only authorized access to Merchant Center data, was announced (~May 2026). Distinct from gads-cli's own architecture (REST, not MCP) — informational only. | (unverified detail) |
+
+Given the "(unverified)" density above, treat this section as a pointer for what to re-check next time this file is refreshed, not as implementation-ready fact — re-fetch the specific schema/release-notes pages before writing code against any row here.
 
 
 ## Base URL(s)
@@ -76,7 +101,7 @@ Source: discovery documents at `https://merchantapi.googleapis.com/$discovery/re
 | Issue Resolution | issueresolution/v1 | Yes | No | Account/product issue resolution |
 | LFP | lfp/v1 | Yes | No | Local Feeds Partnership |
 | Quota | quota/v1 | Yes | No | Quota monitoring |
-| Reviews | reviews/v1beta | No (beta) | Yes | Merchant + product reviews |
+| Reviews | reviews/v1beta + reviews/v1alpha | No (beta) | Yes | Merchant + product reviews; v1alpha adds enable/disable of the Product Reviews program (unverified detail, ~May 2026) |
 | Loyalty Customers | — | No | Yes (alpha) | Loyalty program customers |
 | Product Studio | — | No | Yes (alpha) | AI image/text generation |
 | YouTube Shopping | — | No | beta/alpha | YouTube commerce |
@@ -1435,6 +1460,8 @@ Service account approach is the same.
 | Homepage claim | accounts/v1 | `homepage:claim`, `homepage:unclaim` |
 | Business identity | accounts/v1 | Business identity attributes |
 | Quota monitoring | quota/v1 | `quotas` list |
+| GCP registration lookup | accounts/v1 | `accounts.developerRegistration.getAccountForGcpRegistration` — new as of 2026 (unverified path, see "Recent Interface Changes"); complements the already-implemented `register-gcp` write |
+| Regions batch ops | accounts/v1 | `regions:batchCreate`, `regions:batchUpdate`, `regions:batchDelete` — new alongside existing single-region CRUD (unverified detail, see "Recent Interface Changes") |
 
 ### Priority Gaps for Talas Use Case
 
@@ -1445,7 +1472,7 @@ Service account approach is the same.
 
 ## Sources
 
-All claims in this document are sourced from the following URLs, fetched 2026-06-23:
+All claims in this document are sourced from the following URLs. Original fetch 2026-06-23; version/interface claims re-verified and extended 2026-07-01 (see "Recent Interface Changes" section near the top for what changed in this pass):
 
 | Source | URL |
 |--------|-----|
@@ -1461,6 +1488,10 @@ All claims in this document are sourced from the following URLs, fetched 2026-06
 | Discovery doc: datasources_v1 (methods, DataSource schema) | https://merchantapi.googleapis.com/$discovery/rest?version=datasources_v1 |
 | Discovery doc: inventories_v1 (methods, schemas) | https://merchantapi.googleapis.com/$discovery/rest?version=inventories_v1 |
 | Discovery doc: reports_v1 (search method, report tables) | https://merchantapi.googleapis.com/$discovery/rest?version=reports_v1 |
+| Versioning guide (confirms no v2 exists; v1alpha 30-day notice policy) | https://developers.google.com/merchant/api/guides/versioning |
+| Latest updates changelog (source of the 2026-07-01 "Recent Interface Changes" additions) | https://developers.google.com/merchant/api/latest-updates |
+| Merchant API v1 GA date correction (Aug 18, 2025, not 2024) | https://support.google.com/merchants/answer/16493611?hl=en |
+| `getAccountForGcpRegistration` method existence | https://developers.google.com/merchant/api/reference/rest/accounts_v1/accounts.developerRegistration/getAccountForGcpRegistration |
 
 ### Unverified Claims (doc fetch failed)
 
@@ -1468,6 +1499,7 @@ All claims in this document are sourced from the following URLs, fetched 2026-06
 - Exact `onlineReturnPolicies` object shape — full schema not fetched (404); shape above derived from accounts_v1 discovery doc summary.
 - Exact `issues` response field names (specifically `impactedDestinations` nesting depth) — primary source is CLI source code docstring + accounts overview; dedicated issues reference page 404d.
 - Reports query field names in `product_view` and `product_performance_view` (e.g. `price_micros`, `item_issues`) — derived from discovery doc table names and overview content; the exact field lists require the full reports discovery doc schema.
+- Everything in the 2026-07-01 "Recent Interface Changes" table (near top of doc): the live `products_v1/ProductAttributes` schema page and the exact REST path for `getAccountForGcpRegistration` both failed to load as full schemas during this pass (returned nav-only content or 404) — those rows are sourced from Google's own release-notes/search summaries, not a fetched schema, and are flagged `(unverified)` individually.
 
 
 ---
@@ -1488,11 +1520,11 @@ The Content API for Shopping (v2.1) was a monolithic API with a single base URL 
 
 | Milestone | Date |
 |-----------|------|
-| Merchant API v1 GA announced | 2024 |
+| Merchant API v1 GA | **August 18, 2025** (corrected — previously misstated as "2024" in this doc) |
 | Merchant API v1beta discontinued | February 28, 2026 |
 | Content API for Shopping v2.1 sunset | **August 18, 2026** |
 
-Source: https://developers.google.com/merchant/api/overview, https://developers.google.com/shopping-content/guides/quickstart
+Source: https://developers.google.com/merchant/api/overview, https://developers.google.com/shopping-content/guides/quickstart, https://support.google.com/merchants/answer/16493611?hl=en
 
 #### Migration table — endpoint-by-endpoint
 
@@ -2552,3 +2584,9 @@ Defaults: `--account` defaults to `GOOGLE_MERCHANT_CENTER_ID` from config.
 - One-time setup per GCP project + MC account pair
 - After registration, wait ~5 minutes before retrying merchant commands
 - The `--developer-email` should be the GCP project owner or developer email (the email associated with the GCP project, not necessarily the MC account owner)
+
+### Related (not yet implemented): checking existing registration
+
+A newer read-side method, `accounts.developerRegistration.getAccountForGcpRegistration`, can answer "which Merchant Center account is this GCP project already registered to?" — useful before blindly calling `register-gcp` again. It exists (confirmed via the reference doc URL below) but this KB could not load its full schema to confirm the exact REST path/params, so it is not yet wired into `gads merchant register-gcp`. Treat as a gap for a future `gads merchant gcp-registration-status`-style subcommand.
+
+Source: https://developers.google.com/merchant/api/reference/rest/accounts_v1/accounts.developerRegistration/getAccountForGcpRegistration (unverified path detail — see "Recent Interface Changes" near the top of this doc)

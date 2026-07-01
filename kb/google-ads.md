@@ -2,7 +2,8 @@
 
 > Implementation-grade reference for building new gads-cli subcommands.
 > Every concrete request/response example is derived from the live `gads_lib/ads.py`
-> implementation + official doc pages fetched 2026-06-23.
+> implementation + official doc pages fetched 2026-06-23, re-verified against
+> official + primary-source-cited reporting on 2026-07-01.
 
 ---
 
@@ -10,25 +11,36 @@
 
 | Version | Release Date | Status |
 |---------|-------------|--------|
-| v24.2   | ~2026-06 (announced, not yet released) | Announced |
+| v25     | Not yet released — projected ~2026-07 per third-party reporting citing Google's 2026 cadence | Not GA as of 2026-07-01 (unverified exact date; see note below) |
+| v24.2   | 2026-06-24 | GA |
 | v24.1   | 2026-05-13 | GA |
 | v24     | 2026-04-22 | GA |
+| v23.3   | 2026-06-24 | GA |
 | v23.2   | 2026-03-25 | GA |
 | v23.1   | 2026-02-25 | GA |
 | v23     | 2026-01-28 | GA |
+| v22.2   | 2026-06-24 | GA |
 | v22.1   | 2026-02-25 | GA |
 | v22     | 2025-10-15 | GA |
 | v21.1   | 2026-02-25 | GA |
-| v21     | 2025-08-06 | GA |
+| v21     | 2025-08-06 | GA — **sunsets 2026-08-05** [verified: ads-developers.googleblog.com/2026/06/google-ads-api-v21-sunset-reminder.html, fetched 2026-07-01] |
 
-**Current gads-cli default:** `v24` (env var `GOOGLE_ADS_API_VERSION`, falls back to `"v24"` in `config.py`).
+**v25 status check (2026-07-01):** As of this fetch, neither the official release-notes page nor the Google Ads Developer Blog's 2026 archive (newest post 2026-06-29) lists a v25 announcement. **v24.2 (2026-06-24) is the current latest confirmed-released version.** Third-party reporting (ppc.land, seroundtable, digitalphablet — all citing Google's Sept-2025 "monthly release cadence" announcement) projects v25 for July 2026 with v25.1/v25.2 following in Aug/Sept 2026, but this is **not yet confirmed by an official Google source** as of today. Re-check `https://developers.google.com/google-ads/api/docs/release-notes` before bumping past v24.2. (unverified — projection, not an official release)
 
-**Sunset schedule:** Explicit per-version sunset dates were not extractable from the doc fetch (page exists at `https://developers.google.com/google-ads/api/docs/sunset-dates` but the table content was not returned). Google typically sunsets a version ~12 months after a newer major version ships. (unverified — doc fetch returned navigation only, not the dates table)
+**Current gads-cli default:** `v24` (env var `GOOGLE_ADS_API_VERSION`, falls back to `"v24"` in `config.py` line 64 — confirmed via direct file read 2026-07-01). Minor versions (`v24.1`, `v24.2`) are non-breaking and apply to the same `v24` REST URL segment — no code or env var change needed to pick up their new fields (see DG-13). gads-cli does **not** need to bump to `v24.2` explicitly; it already gets v24.2 fields for free since the URL path stays `/v24/`.
+
+**Sunset schedule:** Google's documented policy (confirmed via raw-HTML fetch of the sunset-dates page, 2026-07-01): **"Google will sunset a version 1 year after its release."** [verified: developers.google.com/google-ads/api/docs/sunset-dates]. The page's actual per-version sunset-date table is rendered client-side and was not extractable via fetch/curl on either the 2026-06-23 or 2026-07-01 attempts — only the policy sentence and the release-date table were recoverable from static HTML. Only **v21's exact sunset date (2026-08-05)** is independently confirmed, via the dedicated blog reminder post. Applying the "1 year after release" rule to the other release dates above gives *inferred* (not officially re-confirmed per-version) sunset estimates: v22 ≈ 2026-10-15, v23 ≈ 2027-01-28, v24 ≈ 2027-04-22. Treat these three as [inference] until the sunset-dates table is directly readable.
 
 **Sources:**
-- Release notes: https://developers.google.com/google-ads/api/docs/release-notes (fetched 2026-06-23)
+- Release notes: https://developers.google.com/google-ads/api/docs/release-notes (fetched 2026-06-23, re-fetched 2026-07-01)
 - Introduction: https://developers.google.com/google-ads/api/docs/get-started/introduction (fetched 2026-06-23)
-- Sunset dates: https://developers.google.com/google-ads/api/docs/sunset-dates (fetched 2026-06-23 — page exists, dates table not extracted)
+- Sunset dates: https://developers.google.com/google-ads/api/docs/sunset-dates (fetched 2026-06-23 and 2026-07-01 — page exists; policy sentence extracted 2026-07-01, per-version table still not extracted, client-rendered)
+- v21 sunset reminder: https://ads-developers.googleblog.com/2026/06/google-ads-api-v21-sunset-reminder.html (fetched 2026-07-01) — confirms 2026-08-05 exact sunset date
+- v24.2 announcement: https://ads-developers.googleblog.com/2026/06/announcing-v242-of-google-ads-api.html (fetched 2026-07-01)
+- v24.2 feature summary: https://ppc.land/google-ads-api-v24-2-ai-transparency-and-pmax-segmentation-finally-arrive/ (fetched 2026-07-01)
+- Monthly release cadence: https://searchengineland.com/google-ads-api-to-switch-to-a-monthly-release-cycle-461596 (fetched 2026-07-01, third-party reporting — unverified against an official Google post in this session)
+- Smart Campaign API creation sunset: https://searchengineland.com/google-ads-api-to-stop-supporting-new-smart-campaign-creation-480999 (fetched 2026-07-01, third-party reporting)
+- DSA automigration delay: https://ads-developers.googleblog.com/2026/06/dynamic-search-ads-dsa-automigration.html (title/date confirmed via search 2026-07-01; body not directly fetchable)
 
 
 ---
@@ -1277,16 +1289,16 @@ Sources: gads-cli CLAUDE.md + `gads_lib/ads.py` + doc pages fetched 2026-06-23.
 | `AudienceService` | Audience definition (not user lists) | Different from `userLists`; segments management |
 | `GoogleAdsFieldService` | Field metadata / `selectable_with` checks | Useful for GAQL field compatibility debugging |
 | `LocalServicesLeadService` | Local Services Ads lead management | Not applicable to current account type |
-| `SmartCampaignService` | Smart campaign management | Not implemented |
+| `SmartCampaignService` | Smart campaign management | Not implemented. Lower priority now: API creation of **new** Smart Campaigns is sunsetting 2026-08-03 (existing campaigns unaffected) — see DG-15 |
 
 
 ---
 
 ## Sources
 
-All URLs fetched on 2026-06-23:
+URLs fetched on 2026-06-23 unless marked otherwise. Refresh pass on 2026-07-01 added items 16-24.
 
-1. https://developers.google.com/google-ads/api/docs/get-started/introduction — API overview, v24.2 announced
+1. https://developers.google.com/google-ads/api/docs/get-started/introduction — API overview (as of 2026-06-23 fetch, v24.2 was still "announced"; it GA'd 2026-06-24 — see item 18)
 2. https://developers.google.com/google-ads/api/docs/release-notes — Version timeline (v21–v24.1), release dates
 3. https://developers.google.com/google-ads/api/rest/reference/rest — REST reference structure (v22, v23, v24 shown)
 4. https://developers.google.com/google-ads/api/docs/query/grammar — GAQL grammar, operators, date macros
@@ -1295,12 +1307,21 @@ All URLs fetched on 2026-06-23:
 7. https://developers.google.com/google-ads/api/docs/best-practices/overview — Batch operations, error handling, development best practices
 8. https://developers.google.com/google-ads/api/docs/get-started/dev-token — Developer token, access levels, `developer-token` header
 9. https://developers.google.com/google-ads/api/docs/account-management/get-account-hierarchy — login-customer-id header, manager vs client account access
-10. https://developers.google.com/google-ads/api/docs/sunset-dates — Sunset dates page exists; table content not extracted
-11. https://developers.google.com/google-ads/api/docs/concepts/quotas — HTTP 404 at this URL
+10. https://developers.google.com/google-ads/api/docs/sunset-dates — Sunset dates page exists; per-version table still not extracted as of 2026-07-01 (client-rendered), but the "1 year after release" policy sentence and the release-date table WERE extracted from raw HTML on 2026-07-01
+11. https://developers.google.com/google-ads/api/docs/concepts/quotas — HTTP 404 at this URL (re-checked 2026-07-01, still true)
 12. https://developers.google.com/google-ads/api/docs/query/overview — GAQL overview, resource types
 13. `/home/talas9/talas-ads/gads-cli/gads_lib/ads.py` — Primary source for all endpoint paths, request shapes, response handling, PII hashing
-14. `/home/talas9/talas-ads/gads-cli/gads_lib/config.py` — API_VERSION default (`v24`), env var names
+14. `/home/talas9/talas-ads/gads-cli/gads_lib/config.py` — API_VERSION default (`v24`), env var names — re-confirmed via direct grep 2026-07-01
 15. `/home/talas9/talas-ads/gads-cli/CLAUDE.md` — Command taxonomy, auth requirements per service, known gotchas
+16. https://developers.google.com/google-ads/api/docs/concepts/versioning (fetched 2026-07-01) — vMAJOR_MINOR numbering scheme, major-vs-minor endpoint behavior
+17. https://ads-developers.googleblog.com/2026/06/google-ads-api-v21-sunset-reminder.html (fetched 2026-07-01) — confirms v21 sunset = 2026-08-05
+18. https://ads-developers.googleblog.com/2026/06/announcing-v242-of-google-ads-api.html (fetched 2026-07-01) — v24.2 GA, 2026-06-24
+19. https://ppc.land/google-ads-api-v24-2-ai-transparency-and-pmax-segmentation-finally-arrive/ (fetched 2026-07-01) — v24.2 feature detail: SyntheticContentInfo, MPA, PMax network segmentation, new experiment types
+20. https://ads-developers.googleblog.com/2026/ (fetched 2026-07-01) — 2026 blog archive listing, used to confirm no v25 post exists yet and to date-stamp the Smart Campaign / DSA / bidding-rename posts
+21. https://searchengineland.com/google-ads-api-to-switch-to-a-monthly-release-cycle-461596 (fetched 2026-07-01, third-party — not independently confirmed on an official Google page this session) — monthly release cadence claim
+22. https://searchengineland.com/google-ads-api-to-stop-supporting-new-smart-campaign-creation-480999 (fetched 2026-07-01) — Smart Campaign API creation sunset 2026-08-03, error enums by version
+23. Search-result summary of https://ads-developers.googleblog.com/2026/06/dynamic-search-ads-dsa-automigration.html (fetched 2026-07-01; body not independently re-fetched) — DSA automigration delay to 2027-02
+24. https://www.digitalapplied.com/blog/google-ads-bidding-budgeting-overhaul-june-2026-ppc-playbook (fetched 2026-07-01, third-party) — Smart Bidding strategy renaming described as cosmetic/UI-only
 
 
 ---
@@ -1496,9 +1517,11 @@ Ad group type is set at creation and cannot be changed. The type constrains whic
 | `VIDEO_OUTSTREAM` | VIDEO | `VIDEO_OUTSTREAM_AD` |
 | `VIDEO_RESPONSIVE` | VIDEO | `VIDEO_RESPONSIVE_AD` |
 | `HOTEL_ADS` | HOTEL | `HOTEL_AD` |
-| `SMART_CAMPAIGN_ADS` | SMART | `SMART_CAMPAIGN_AD` |
+| `SMART_CAMPAIGN_ADS` | SMART | `SMART_CAMPAIGN_AD` — **API creation of new Smart Campaigns (`SMART_CAMPAIGN_ADS`/`advertising_channel_sub_type: SMART_CAMPAIGN`) stops 2026-08-03**; existing ones stay readable/updatable. See DG-15. |
 
 **PMax campaigns do NOT use ad groups** — they use Asset Groups instead (see DG-6).
+
+**DSA note:** `SEARCH_DYNAMIC_ADS` / `EXPANDED_DYNAMIC_SEARCH_AD` creation remains fully supported via the API (not affected by the Smart Campaign cutoff above). Its separate auto-migration to AI Max was delayed from Sept 2026 to Feb 2027 — see DG-15.
 
 #### AdGroup required fields
 
@@ -1602,6 +1625,7 @@ FROM   resource_name
 | `product_group_view` | Shopping product group performance |
 | `search_term_view` | Search terms that triggered ads |
 | `shopping_performance_view` | Shopping campaign performance |
+| `performance_max_placement_view` | PMax placement-level performance | As of v24.2, segmentable by `segments.ad_network_type` (SEARCH/CONTENT/YOUTUBE/etc.) — see DG-15 |
 | `topic_view` | Contextual topic performance |
 | `user_interest` | Interest audience categories |
 | `user_list` | Audience lists (Customer Match, remarketing) |
@@ -2504,7 +2528,7 @@ Specific numeric limits vary by developer token access level and are enforced se
 
 ### DG-13. API Versioning Policy
 
-Ref: https://developers.google.com/google-ads/api/docs/sunset-dates
+Ref: https://developers.google.com/google-ads/api/docs/sunset-dates, https://developers.google.com/google-ads/api/docs/concepts/versioning
 
 #### Version lifecycle
 
@@ -2512,14 +2536,15 @@ Ref: https://developers.google.com/google-ads/api/docs/sunset-dates
 |-------|----------|-------|
 | Announced | ~3 months before GA | Docs published, no API access |
 | GA (Generally Available) | Active production use | Supported, no breaking changes |
-| Sunset announced | Typically ~12 months after next major | Deprecation warning in headers |
-| Sunset | After sunset date | Returns error on all requests |
+| Sunset announced | Reminder posted on the developer blog ahead of the date | e.g. v21's reminder post went up 2026-06-25 for its 2026-08-05 sunset |
+| Sunset | Exactly **1 year after a version's release** [verified: sunset-dates page policy text, fetched 2026-07-01] | Returns error on all requests after this date |
 
 #### Release cadence
 
-- Google releases **3–4 major versions per year** (v21, v22, v23, v24, v24.1, v24.2)
-- Minor versions (e.g., `v24.1`) add features without breaking changes
-- Major versions may have breaking changes — field renames, removed resources, changed enums
+- Confirmed released major versions to date: v21 (2025-08-06), v22 (2025-10-15), v23 (2026-01-28), v24 (2026-04-22) — each followed by 2-3 non-breaking minor releases (`.1`, `.2`, `.3`).
+- Google's own versioning-concepts page states version numbers follow `vMAJOR_MINOR` format (major versions end in 0), major versions carry breaking changes and their own endpoint, minor versions are backward-compatible additions applied to the same endpoint. [verified: developers.google.com/google-ads/api/docs/concepts/versioning, fetched 2026-07-01]
+- Third-party reporting (not independently confirmed on an official Google page in this session) describes a shift to a **monthly release cadence starting January 2026**: 4 major versions/year instead of 3 (v23, v24, v25, v26), each with a full 12-month support window, plus 2-3 minor point releases between majors. Under this schedule v25 would GA ~July 2026, v25.1 ~August 2026, v25.2 ~September 2026, with v25's sunset ~August 2027. (unverified — third-party sourced; treat as [inference] until confirmed via an official release-notes or blog entry)
+- Major versions may have breaking changes — field renames, removed resources, changed enums. Minor versions (e.g., `v24.1`, `v24.2`) only add features/fields without breaking changes and do not require a URL or `GADS_API_VERSION` change to start using.
 
 #### Migration path
 
@@ -2540,19 +2565,22 @@ https://googleads.googleapis.com/v24/customers/...
                                  ^^^
 ```
 
-Changing the env var changes all requests immediately — no code changes needed in gads-cli.
+Changing the env var changes all requests immediately — no code changes needed in gads-cli. Minor releases (`v24.1`, `v24.2`, ...) do **not** get their own URL segment — they layer new fields/resources onto the existing major-version endpoint (`/v24/`), confirmed by the release notes consistently describing v24.1/v24.2 as additive to the `/v24/` endpoint rather than a separate path. [verified: developers.google.com/google-ads/api/docs/release-notes cross-read, fetched 2026-07-01]
 
-#### Current and recent versions (as of 2026-06-23)
+#### Current and recent versions (as of 2026-07-01)
 
 | Version | Status | Released |
 |---------|--------|----------|
-| v24.2 | Announced | ~2026-06 (not yet GA) |
+| v25 | Not GA | Projected ~2026-07 (unverified — third-party reporting only, no official confirmation as of this fetch) |
+| v24.2 | GA | 2026-06-24 |
 | v24.1 | GA | 2026-05-13 |
 | v24 | GA | 2026-04-22 |
+| v23.3 | GA | 2026-06-24 |
 | v23.2 | GA | 2026-03-25 |
 | v23 | GA | 2026-01-28 |
+| v22.2 | GA | 2026-06-24 |
 | v22 | GA | 2025-10-15 |
-| v21 | GA | 2025-08-06 |
+| v21 | GA — **sunsets 2026-08-05** | 2025-08-06 |
 
 ---
 
@@ -2708,3 +2736,55 @@ Add `"validateOnly": true` to any mutate request to validate fields and permissi
 Returns empty `results` on success, or errors on validation failure. Use before any production mutation.
 
 Ref: https://developers.google.com/google-ads/api/docs/mutating/validate-mutate
+
+---
+
+### DG-15. What's New Since 2026-06-23 (v24.2 + 2026-Q2/Q3 policy changes)
+
+> This section captures everything that changed between the file's original write date (2026-06-23) and this refresh (2026-07-01). Kept as a dated addendum rather than merged silently into the sections above, so future refreshes can see exactly what was added and when. Sources are cited inline; anything not independently confirmed on an official Google page is marked accordingly.
+
+#### v24.2 (2026-06-24) — feature additions
+
+All of the following are additive to the existing `/v24/` endpoint — no URL or config change needed to access them, only `updateMask`/field additions in existing request shapes.
+
+| Area | What's new | Notes |
+|------|-----------|-------|
+| AI content transparency | `SyntheticContentInfo` / `SyntheticContentAttestation` structures on `Asset` and `Ad` resources | Lets advertiser + Google systems attest whether an asset/ad is AI-generated. `synthetic_content_info.advertiser_attestation.status` and `.source` are present but **immutable through v24.2**; per reporting they become mutable in v25 (unreleased as of 2026-07-01). Ties to the EU AI Act Article 50 transparency deadline of 2026-08-02. [verified via secondary summary: ppc.land, fetched 2026-07-01; primary announcement post body was not directly fetchable — treat feature *existence* as confirmed, exact field mutability timeline as (unverified)] |
+| Account security | Multi-Party Approval (MPA) — a second-administrator approval requirement for sensitive account actions (user invitations, access escalation) | Backported simultaneously to v23.3, v22.2, v21.2. Ref: https://ads-developers.googleblog.com/2026/06/multi-party-approvals-in-google-ads-api.html (title/date confirmed via blog archive listing 2026-06-25; body not independently fetched — (unverified) detail level) |
+| PMax reporting | `performance_max_placement_view` now segmentable by `segments.ad_network_type` (`SEARCH`, `SEARCH_PARTNERS`, `CONTENT`, `MIXED`, `YOUTUBE_SEARCH`, `YOUTUBE_WATCH`) | Add `performance_max_placement_view` to the queryable-resources list in DG-4 if building PMax placement/network reports. |
+| Experiments | New `ExperimentType` values: `COMPARE_CAMPAIGNS` (multi-arm comparison, up to 5 experiment arms across mixed campaign types) and `PMAX_TEXT_CUSTOMIZATION_FINAL_URL_EXPANSION` (split-traffic test for PMax text customization + final URL expansion) | Extends the experiment-type enum used with `ExperimentService` (not otherwise documented in this file — see Gaps). |
+| Asset automation | New `AssetAutomationType` value `LANDING_PAGE_TEXT_GENERATION` | Opt-in automatic text-asset generation sourced from landing page content. |
+| v24.1 (2026-05-13) carry-forward | `ExperimentType` values `ADOPT_AI_MAX` and `ADOPT_BROAD_MATCH_KEYWORDS` | Formalized experiment types supporting the DSA→AI Max and broad-match migration workflows (see below). [reported via searchengineland.com summary, fetched 2026-07-01 — (unverified) against a primary Google source in this session] |
+
+Source: https://ads-developers.googleblog.com/2026/06/announcing-v242-of-google-ads-api.html (title/date verified 2026-07-01; feature detail cross-checked against https://ppc.land/google-ads-api-v24-2-ai-transparency-and-pmax-segmentation-finally-arrive/, fetched 2026-07-01)
+
+#### Smart Campaign creation sunset — 2026-08-03
+
+Effective **2026-08-03**, the Google Ads API stops accepting **new** Smart Campaign creation (`campaign.advertising_channel_type = SMART` with `advertising_channel_sub_type = SMART_CAMPAIGN`). This is a creation-only cutoff:
+
+- **Existing** Smart Campaigns keep running and remain fully readable/updatable via the API — no forced migration of live campaigns.
+- Post-cutoff creation attempts return:
+  - `SmartCampaignError.CREATION_FAILED` on **v24.x**
+  - `OperationAccessDeniedError.CREATE_OPERATION_NOT_PERMITTED` on **v23.x and earlier**
+- Google's recommended replacement path: Performance Max (primary), or Search / Demand Gen depending on goals.
+- Affects: DG-3's `SMART_CAMPAIGN_ADS` ad-group type row (creation only; existing rows still valid for read/update), and the "Gaps / Not Yet Implemented" table's `SmartCampaignService` entry below.
+
+Source: https://searchengineland.com/google-ads-api-to-stop-supporting-new-smart-campaign-creation-480999 (fetched 2026-07-01 — third-party reporting, cites the underlying Google Ads Developer Blog post directly; blog post body itself not independently re-fetched in this session, so treat exact error-enum names as (unverified) pending a direct primary-source read).
+
+#### Dynamic Search Ads (DSA) → AI Max automigration — delayed to 2027-02
+
+The forced automigration of DSA campaigns (ad_group type `SEARCH_DYNAMIC_ADS`, ad type `EXPANDED_DYNAMIC_SEARCH_AD` — see DG-3) to AI Max / broad-match Search was originally slated for September 2026 and has been **delayed to February 2027**:
+
+- **2026-06 onward:** DSA campaign creation via the API is fully restored/unaffected (no creation freeze, unlike Smart Campaigns above).
+- **2026-06 → 2027-01:** extended voluntary testing/migration window. New `ExperimentType` values `ADOPT_AI_MAX` / `ADOPT_BROAD_MATCH_KEYWORDS` (introduced v24.1) map to this testing path.
+- **2027-01:** creation of new DSA campaigns is removed.
+- **2027-02:** automatic migration begins for any DSA campaigns still active.
+- **Not delayed:** auto-generated assets and the campaign-level broad-match setting still transition on the original September 2026 schedule.
+
+Source: title/date confirmed via Google Ads Developer Blog archive listing (`ads-developers.googleblog.com/2026/`, post dated 2026-06-11, fetched 2026-07-01) and cross-referenced against searchengineland.com / ppc.land summaries (fetched 2026-07-01). Post body was not independently fetched in this session — treat the specific milestone dates above as (unverified) pending a direct primary-source read, though multiple independent secondary sources agree on them.
+
+#### Smart Bidding strategy renaming — cosmetic only (2026-06-16)
+
+Google renamed two Smart Bidding display labels in the Ads UI: "Maximize conversions with a Target CPA" → **Target CPA**, and "Maximize conversion value with a Target ROAS" → **Target ROAS**. Third-party reporting (digitalapplied.com, fetched 2026-07-01) explicitly describes this as a **UI-only, no-behavioral-change rename** requiring no account or integration changes. This session could not independently confirm from an official Google source whether the underlying `biddingStrategyType` REST enum values (`MAXIMIZE_CONVERSIONS`, `TARGET_CPA`, `TARGET_ROAS` in DG-2) were touched — treat "no API schema change" as (unverified, plausible-but-not-primary-sourced). If a caller sees an unexpected 400 on these bidding fields after 2026-06-16, re-verify against the live `GoogleAdsFieldService` output rather than assuming the rename is purely cosmetic.
+
+---

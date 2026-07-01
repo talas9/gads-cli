@@ -39,3 +39,8 @@ Runs the full 12-section compliance audit. `--format json` for agent pipelines.
 - Client: Talas Ads (355-285-6345)
 - Manager: 670-695-5825
 - Currency: AED | API version: v24
+
+## Also see mads-cli
+
+For Meta (Facebook/Instagram) Ads — Marketing API, Conversions API, Commerce Manager — the sister
+CLI: https://github.com/talas9/mads-cli

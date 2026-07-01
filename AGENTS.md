@@ -143,3 +143,15 @@ The audit produces `overall_score` (0-100), `grade` (A-F), and per-section score
 # 4. Run drift check
 gads kb check   # must exit 0
 ```
+
+## Sister tool
+
+For **Meta (Facebook/Instagram) Ads** — Marketing API campaigns/ad sets/ads/creatives, Business
+Manager, Conversions API (CAPI), and Commerce Manager — see the sister CLI **mads-cli**:
+https://github.com/talas9/mads-cli
+
+`mads-cli` mirrors this CLI's conventions module-for-module (scope-aware config, `--json`/
+`--plain`/`--quiet`, structured error envelope, `snapshot → mutate → log` discipline, `catalog
+--json`). Its exit-code set additionally defines a mads-specific `RATE_LIMIT=8` (Meta's Graph API
+returns explicit rate-limit error codes gads-cli's Google Ads REST calls don't surface the same
+way). `gads doctor --json` reports a `sibling_cli` field detecting `mads` on PATH.

@@ -9,6 +9,7 @@ See .env.example for the full list.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -87,7 +88,14 @@ from gads_lib.catalog import build_catalog
 from gads_lib import dbread
 
 
-@click.group(context_settings={"auto_envvar_prefix": "GADS"})
+@click.group(
+    context_settings={"auto_envvar_prefix": "GADS"},
+    epilog=(
+        "For Meta (Facebook/Instagram) Ads — Marketing API, Business Manager, "
+        "Conversions API, and Commerce Manager — see the sister CLI mads-cli: "
+        "https://github.com/talas9/mads-cli"
+    ),
+)
 @click.version_option(__version__, prog_name="gads")
 @click.option("--plain", is_flag=True, help="Deterministic output: no color, no emoji (for parsing).")
 @click.option("--quiet", "-q", is_flag=True, help="Suppress non-essential progress/info output.")
@@ -677,6 +685,13 @@ def _finish_setup():
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def doctor(as_json):
     """Run local CLI readiness checks."""
+    sibling_path = shutil.which("mads")
+    sibling_cli = {
+        "name": "mads",
+        "installed": sibling_path is not None,
+        "path": sibling_path,
+    }
+
     checks = [
         {"check": "scope", "status": "ok", "detail": f"{SCOPE_TYPE} → {SCOPE_ROOT}"},
         {"check": "credentials", "status": "ok" if CREDS_PATH.exists() else "fail", "detail": str(CREDS_PATH)},
@@ -688,14 +703,17 @@ def doctor(as_json):
         {"check": "ga4_property_id", "status": "ok" if GA4_PROPERTY_ID else "warn", "detail": "set" if GA4_PROPERTY_ID else "missing (optional)"},
         {"check": "timezone", "status": "ok", "detail": TZ_NAME},
         {"check": "currency", "status": "ok", "detail": CURRENCY},
+        {"check": "sibling_cli", "status": "ok" if sibling_cli["installed"] else "warn", "detail": sibling_path or "mads not found on PATH"},
     ]
 
     if as_json:
-        print_json(checks)
+        print_json({"checks": checks, "sibling_cli": sibling_cli})
         return
 
     click.secho("\n  gads doctor\n", fg="white", bold=True)
     print_table(checks, ["check", "status", "detail"])
+    click.echo()
+    click.echo(f"  sibling_cli (mads-cli): installed={sibling_cli['installed']} path={sibling_cli['path']}")
     failures = [c for c in checks if c["status"] == "fail"]
     if failures:
         raise SystemExit(1)

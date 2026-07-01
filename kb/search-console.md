@@ -10,14 +10,19 @@ The Search Console API has two co-existing API surface names that point to the s
 | **Current** | `searchconsole` v1 | `https://searchconsole.googleapis.com/v1` (URL Inspection only) | Active |
 | **Legacy name** | `webmasters` v3 | same endpoints | Still functional; discovery document support ended 2020-12-31 |
 
-**Key finding:** The name change from `webmasters` v3 → `searchconsole` v1 was cosmetic/discovery-level only. The underlying REST endpoints at `www.googleapis.com/webmasters/v3` did **not** change and remain active as of 2025-08-28 (last confirmed doc update). The gads CLI's use of `GSC_BASE = "https://www.googleapis.com/webmasters/v3"` is functionally correct; the only practical difference is that Python client library callers should now use `build('searchconsole', 'v1')` instead of `build('webmasters', 'v3')`.
+**Key finding:** The name change from `webmasters` v3 → `searchconsole` v1 was cosmetic/discovery-level only. The underlying REST endpoints at `www.googleapis.com/webmasters/v3` did **not** change and remain active as of 2026-07-01 (re-verified against the live discovery document, see below). The gads CLI's use of `GSC_BASE = "https://www.googleapis.com/webmasters/v3"` is functionally correct; the only practical difference is that Python client library callers should now use `build('searchconsole', 'v1')` instead of `build('webmasters', 'v3')`.
 
 The **URL Inspection API** (added January 2022) uses a different base host: `https://searchconsole.googleapis.com/v1`.
+
+**No v2 exists.** Fetched the live discovery document directly (`https://www.googleapis.com/discovery/v1/apis/searchconsole/v1/rest`) on 2026-07-01: `"version": "v1"`, `"revision": "20260630"` (i.e. Google republished/re-validated this same v1 discovery doc as recently as 2026-06-30, one day before this refresh — there is still no `v2` and no announced successor). This confirms the API surface documented below is the current, actively-maintained one — not stale. [verified: live discovery doc, fetched 2026-07-01]
+
+**Discovery doc also lists a `urlTestingTools.mobileFriendlyTest.run` method** (`POST v1/urlTestingTools/mobileFriendlyTest:run`) that is **not** in the endpoint tables below. Do not implement it: Google officially retired the entire Mobile-Friendly Test tool and API on 2023-12-01 (https://searchengineland.com/google-officially-drops-mobile-usability-report-mobile-friendly-test-tool-and-mobile-friendly-test-api-435377). The method definition is a leftover schema stub in the discovery doc; calling it does not return live results. [verified: live discovery doc schema, fetched 2026-07-01]
 
 Sources:
 - https://developers.google.com/webmaster-tools/v1/api_reference_index
 - https://developers.google.com/search/blog/2020/08/search-console-api-announcements
 - https://developers.google.com/search/blog/2020/12/search-console-api-updates
+- https://www.googleapis.com/discovery/v1/apis/searchconsole/v1/rest (live discovery doc, revision 20260630, fetched 2026-07-01)
 
 ---
 
@@ -633,8 +638,19 @@ When a `searchAnalytics.query` returns zero results (valid date range with no da
 - Only available for recent date ranges (unverified — doc fetch returned no explicit cutoff)
 
 ### FAQ search appearance deprecated August 2026
-- The `searchAppearance` dimension value for FAQ rich results is being deprecated in August 2026
+- FAQ rich results stopped appearing in Google Search as of **2026-05-07**; the `searchAppearance` dimension value for FAQ rich results in the API is scheduled for full deprecation in **August 2026** (confirmed via web search against 2026 SEO/Search-Central coverage — Google's own dated blog post for this specific removal was not directly fetched, so treat the exact August 2026 date as **(unverified — third-party corroborated, not confirmed on an official dated Google page)**)
 - Other `searchAppearance` values remain valid
+- Structured-data support for practice-problem markup and a few lesser-used schemas was removed from Search Console (and its API-reported rich-result types) starting January 2026 (unverified — third-party summary only, no official dated source fetched)
+
+### mobileFriendlyTest.run is a dead endpoint (do not implement)
+- The live discovery document (`https://www.googleapis.com/discovery/v1/apis/searchconsole/v1/rest`, revision `20260630`, fetched 2026-07-01) still defines `urlTestingTools.mobileFriendlyTest.run` (`POST v1/urlTestingTools/mobileFriendlyTest:run`)
+- Google officially retired the whole Mobile-Friendly Test tool + API on 2023-12-01 (https://searchengineland.com/google-officially-drops-mobile-usability-report-mobile-friendly-test-tool-and-mobile-friendly-test-api-435377) — the schema stub still shows up in discovery, but the service behind it is gone
+- Do not build a `gsc mobile-friendly-test` subcommand against this; it will not return real results
+
+### 2026 Search Console UI features are NOT new API fields
+- Late-2025/2026 additions like the branded-vs-non-branded queries filter, "Query Groups", AI natural-language report configuration, weekly/monthly Performance-report aggregation, and Social Channels in Insights are **Search Console web-app (UI) features only**
+- The live discovery document (revision `20260630`) shows **no new `dimensions[]` values, no new `type` values, and no new request/response fields** to support these — the `SearchAnalyticsQueryRequest`/`SearchAnalyticsQueryResponse` schemas are unchanged from what's documented in this file
+- Several third-party SEO blogs describe these as "new API dimensions" — that claim is **not corroborated by the live discovery doc and should be treated as incorrect** for API-integration purposes [verified: live discovery doc schema dump, fetched 2026-07-01]
 
 ### rowLimit maximum is 25,000
 - Values above 25,000 will be rejected with HTTP 400.
@@ -676,17 +692,20 @@ Current `gads_lib/gsc.py` uses:
 
 ## Sources
 
-All claims in this document are sourced from the URLs below, fetched June 2026:
+All claims in this document are sourced from the URLs below. Re-verified 2026-07-01 (previous pass: June 2026); per-page "last updated" dates as fetched are noted where the doc shows one:
 
-- https://developers.google.com/webmaster-tools/v1/api_reference_index
-- https://developers.google.com/webmaster-tools/v1/searchanalytics/query
-- https://developers.google.com/webmaster-tools/v1/sites/list
-- https://developers.google.com/webmaster-tools/v1/sitemaps/list
-- https://developers.google.com/webmaster-tools/v1/how-tos/authorizing (last updated 2025-08-28 UTC)
-- https://developers.google.com/webmaster-tools/limits
+- https://developers.google.com/webmaster-tools/v1/api_reference_index (no v2/deprecation notice; last updated 2024-07-23 UTC as displayed on the page, re-fetched 2026-07-01)
+- https://developers.google.com/webmaster-tools/v1/searchanalytics/query (last updated 2026-05-20 UTC — newer than the previous KB pass; content re-checked, no breaking changes found)
+- https://developers.google.com/webmaster-tools/v1/sites/list (last updated 2024-07-23 UTC, unchanged)
+- https://developers.google.com/webmaster-tools/v1/sitemaps/list (last updated 2024-07-23 UTC, unchanged)
+- https://developers.google.com/webmaster-tools/v1/how-tos/authorizing (last updated 2025-08-28 UTC, unchanged — scopes identical)
+- https://developers.google.com/webmaster-tools/limits (last updated 2025-08-28 UTC, unchanged — quotas identical)
 - https://developers.google.com/search/blog/2020/08/search-console-api-announcements
 - https://developers.google.com/search/blog/2020/12/search-console-api-updates
 - https://developers.google.com/webmaster-tools/search-console-api-original/v3/sites/get
+- https://www.googleapis.com/discovery/v1/apis/searchconsole/v1/rest — live discovery document, revision `20260630`, fetched + parsed directly (not summarized) on 2026-07-01; authoritative source for exact enum values (`type`, `dimensions`, `dataState`, `aggregationType`, filter `operator`/`dimension`) and the full method list, including the confirmation that no `v2` exists and that `urlTestingTools.mobileFriendlyTest.run` is a stale/dead schema entry
+- https://searchengineland.com/google-officially-drops-mobile-usability-report-mobile-friendly-test-tool-and-mobile-friendly-test-api-435377 — confirms Mobile-Friendly Test API retirement effective 2023-12-01
+- WebSearch results (2026-07-01, not an official Google page) corroborating: FAQ rich results stopped 2026-05-07 / API deprecation slated August 2026; practice-problem structured-data removal January 2026; 2026 Search Console UI additions (branded queries filter, Query Groups, AI report config) — all flagged `(unverified)` above where no dated official Google page was directly fetched
 
 ---
 
@@ -792,14 +811,15 @@ The `type` field (also seen as `searchType` in older docs) controls which index 
 | `news` | Google News tab results |
 | `googleNews` | news.google.com and Google News app |
 | `discover` | Google Discover feed (no query data — query dimension is unsupported) |
-| `chromeNotifications` | Chrome browser notification cards |
+
+**Correction (2026-07-01):** A previous version of this document listed `chromeNotifications` as a valid `type` value. That value does **not** appear in the live discovery document's `SearchAnalyticsQueryRequest.type` enum (`WEB`, `IMAGE`, `VIDEO`, `NEWS`, `DISCOVER`, `GOOGLE_NEWS` only — fetched and dumped directly from `https://www.googleapis.com/discovery/v1/apis/searchconsole/v1/rest`, revision `20260630`) and no independent web source corroborates it ever being a documented, callable value. Treat `chromeNotifications` as incorrect/unverified and do not implement it. [verified: live discovery doc schema, fetched 2026-07-01]
 
 **Notes:**
 - `discover` does not support the `query` dimension — omit it or the API returns 400.
 - `googleNews` and `news` are distinct: `news` = news tab in web search; `googleNews` = the standalone News product.
 - Default is `web` if `type` is omitted.
 
-Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query
+Source: https://developers.google.com/webmaster-tools/v1/searchanalytics/query; enum cross-checked against https://www.googleapis.com/discovery/v1/apis/searchconsole/v1/rest (revision 20260630)
 
 ---
 

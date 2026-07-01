@@ -2,24 +2,26 @@
 
 ## Status & Versions
 
+_Last verified against official docs: 2026-07-01._
+
 ### Data API
 - **v1beta** — stable, production-ready; the primary version used for reporting
-- **v1alpha** — experimental; adds funnel reports, audience lists, recurring audience lists, report tasks, and property quota snapshots
-- No separate `v1` (fully GA) release found; `v1beta` is the current stable channel as of 2026-06-23
+- **v1alpha** — experimental; adds funnel reports, audience lists, recurring audience lists, report tasks, property quota snapshots, and (new, 2026-04-23) **Conversion Reporting** via `runReport` — see Developer Guide §16
+- No separate `v1` (fully GA) release found; `v1beta` is still the current stable channel as of 2026-07-01 — re-confirmed against the live REST resource listing (no `v1` resource group exists, only `v1beta` and `v1alpha`)
 - Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
 
 ### Admin API
-- **v1beta** — stable; "No breaking changes are expected in this channel" — covers account/property management, key events, custom dimensions/metrics, service links
-- **v1alpha** — early preview; adds audiences, BigQuery links, Search Ads 360, channel groups, event edit rules, subproperties, data redaction, etc.
-- Source: https://developers.google.com/analytics/devguides/config/admin/v1
+- **v1beta** — stable; "No breaking changes are expected in this channel" — covers account/property management, **key events** (used by gads CLI, see below), custom dimensions/metrics, service links, data retention settings, and (new, 2026-06-18) `UpdateReportingIdentitySettings` + `can_edit` field on `PropertySummary`
+- **v1alpha** — early preview; adds audiences, BigQuery links, Search Ads 360, channel groups, event edit rules, subproperties, data redaction, SKAdNetwork conversion value schemas, Google Signals settings, and (new, 2026-04-14) `GetUserProvidedDataSettings`
+- Source: https://developers.google.com/analytics/devguides/config/admin/v1, changelog: https://developers.google.com/analytics/devguides/config/admin/v1/changelog
 
 ### Admin API v1alpha vs v1beta — Key Events specifically
 
 The `properties.keyEvents` resource exists in **both** v1alpha and v1beta with identical method sets (create, delete, get, list, patch). No behavioral differences are documented between the two versions for key events.
 
-**Recommendation for new gads CLI subcommands:** Switch key events calls to `v1beta` — it carries the "no breaking changes" stability guarantee. The current CLI uses `v1alpha`, which works but is technically on the early-preview channel.
+**gads CLI status: MIGRATED.** As of gads-cli **v3.8.2**, `GA4_ADMIN_BASE` in `gads_lib/ga4.py` points at `https://analyticsadmin.googleapis.com/v1beta` (previously `v1alpha`). All key-events calls (`list`, `create`, `delete`) now run on the stable v1beta channel — confirmed against source (`gads_lib/ga4.py:18`), `kb/manifest.json`, `kb/INDEX.md`, and `gads kb check` (all report `ga4 Admin API: v1beta`). This section previously described the CLI as still using v1alpha with a migration "recommended" — that has been corrected below and throughout this file: v1beta is what the CLI actually calls today.
 
-**v1alpha sunset:** No sunset date has been announced (as of 2026-06-23). Google typically promotes features from v1alpha → v1beta when they stabilize, rather than removing v1alpha. However, relying on v1alpha for production code is discouraged for resources that are already promoted to v1beta.
+**v1alpha sunset:** No sunset date has been announced (as of 2026-07-01). Google typically promotes features from v1alpha → v1beta when they stabilize, rather than removing v1alpha.
 
 Sources: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents, https://developers.google.com/analytics/devguides/config/admin/v1
 
@@ -48,7 +50,7 @@ Sources: https://developers.google.com/analytics/devguides/reporting/data/v1/res
 
 The gads CLI project's `generate_token.py` already includes both `analytics.readonly` and `analytics.edit`. If a `403 Forbidden` appears on write calls, the token was generated before `analytics.edit` was added — regenerate it.
 
-Sources: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents/list
+Sources: https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/list
 
 ---
 
@@ -80,23 +82,25 @@ Sources: https://developers.google.com/analytics/devguides/reporting/data/v1/res
 | properties.recurringAudienceLists | create/get/list | POST/GET | `/v1alpha/{parent=properties/*}/recurringAudienceLists` | Scheduled recurring audience list snapshots | https://developers.google.com/analytics/devguides/reporting/data/v1/rest |
 | properties.reportTasks | create/get/list/query | POST/GET | `/v1alpha/{parent=properties/*}/reportTasks` | Async large report tasks | https://developers.google.com/analytics/devguides/reporting/data/v1/rest |
 
-### Admin API (v1alpha — key events used by current gads CLI)
+### Admin API (v1beta — key events used by current gads CLI)
+
+`GA4_ADMIN_BASE = https://analyticsadmin.googleapis.com/v1beta` (`gads_lib/ga4.py:18`, migrated from v1alpha in gads-cli v3.8.2).
 
 | Resource | Method | HTTP | Path | Purpose | Source URL |
 |----------|--------|------|------|---------|------------|
-| properties.keyEvents | list | GET | `/v1alpha/{parent=properties/*}/keyEvents` | List all key events for a property (paginated) | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents/list |
-| properties.keyEvents | create | POST | `/v1alpha/{parent=properties/*}/keyEvents` | Create a new key event | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents |
-| properties.keyEvents | get | GET | `/v1alpha/{name=properties/*/keyEvents/*}` | Get a single key event | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents |
-| properties.keyEvents | patch | PATCH | `/v1alpha/{keyEvent.name=properties/*/keyEvents/*}` | Update key event fields (e.g. countingMethod) | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents |
-| properties.keyEvents | delete | DELETE | `/v1alpha/{name=properties/*/keyEvents/*}` | Delete a key event | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents |
+| properties.keyEvents | list | GET | `/v1beta/{parent=properties/*}/keyEvents` | List all key events for a property (paginated) | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/list |
+| properties.keyEvents | create | POST | `/v1beta/{parent=properties/*}/keyEvents` | Create a new key event | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents |
+| properties.keyEvents | get | GET | `/v1beta/{name=properties/*/keyEvents/*}` | Get a single key event | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents |
+| properties.keyEvents | patch | PATCH | `/v1beta/{keyEvent.name=properties/*/keyEvents/*}` | Update key event fields (e.g. countingMethod) | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents |
+| properties.keyEvents | delete | DELETE | `/v1beta/{name=properties/*/keyEvents/*}` | Delete a key event | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents |
 
-### Admin API (v1beta — stable alternative for key events)
+### Admin API (v1alpha — same resource, early-preview channel)
 
-The `properties.keyEvents` resource exposes the same five methods (create, delete, get, list, patch) in v1beta. No documented behavioral differences vs v1alpha for key events. New subcommands should prefer v1beta.
+The `properties.keyEvents` resource exposes the same five methods (create, delete, get, list, patch) in v1alpha too. No documented behavioral differences vs v1beta for key events. This is the version the gads CLI used **before** v3.8.2; kept here only for historical/compatibility reference — do not build new code against it.
 
-To switch: replace `analyticsadmin.googleapis.com/v1alpha` with `analyticsadmin.googleapis.com/v1beta` in the base URL. No other changes needed for key events.
+To use it: replace `analyticsadmin.googleapis.com/v1beta` with `analyticsadmin.googleapis.com/v1alpha` in the base URL. No other changes needed for key events.
 
-Source: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents
+Source: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents
 
 ---
 
@@ -465,12 +469,12 @@ Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
 
 ---
 
-### GET /v1alpha/properties/{pid}/keyEvents (list)
+### GET /v1beta/properties/{pid}/keyEvents (list)
 
-**Full HTTP request:**
+**Full HTTP request** (as issued by `gads_lib/ga4.py::list_key_events`, `GA4_ADMIN_BASE = v1beta`):
 
 ```
-GET https://analyticsadmin.googleapis.com/v1alpha/properties/271773771/keyEvents?pageSize=200
+GET https://analyticsadmin.googleapis.com/v1beta/properties/271773771/keyEvents?pageSize=200
 Authorization: Bearer ya29.a0ARrdaM...{token}
 ```
 
@@ -541,16 +545,16 @@ while True:
         break
 ```
 
-Source: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents/list
+Source: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/list
 
 ---
 
-### POST /v1alpha/properties/{pid}/keyEvents (create)
+### POST /v1beta/properties/{pid}/keyEvents (create)
 
-**Full HTTP request:**
+**Full HTTP request** (as issued by `gads_lib/ga4.py::create_key_event`):
 
 ```
-POST https://analyticsadmin.googleapis.com/v1alpha/properties/271773771/keyEvents
+POST https://analyticsadmin.googleapis.com/v1beta/properties/271773771/keyEvents
 Authorization: Bearer ya29.a0ARrdaM...{token}
 Content-Type: application/json
 
@@ -604,20 +608,20 @@ Content-Type: application/json
 }
 ```
 
-**Handling 409 in the CLI:** The existing `ga4.py` code should treat 409 as "already exists — skip" for bulk operations, not as a fatal error.
+**Handling 409 in the CLI:** `ga4.py::create_key_event` treats 409 as "already exists" — it re-looks up the existing entry via `list_key_events` and returns it with `_already_exists: True` instead of raising.
 
-Source: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents
+Source: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents
 
 ---
 
-### DELETE /v1alpha/properties/{pid}/keyEvents/{keyEventId}
+### DELETE /v1beta/{keyEvent.name}
 
 **Critical:** The path uses the **full resource name** from the `name` field of the KeyEvent object — NOT the `eventName` string. The `keyEventId` segment is the numeric ID from `name` (e.g. `"44444444"` from `"properties/271773771/keyEvents/44444444"`).
 
-**Full HTTP request:**
+**Full HTTP request** (as issued by `gads_lib/ga4.py::delete_key_event`):
 
 ```
-DELETE https://analyticsadmin.googleapis.com/v1alpha/properties/271773771/keyEvents/44444444
+DELETE https://analyticsadmin.googleapis.com/v1beta/properties/271773771/keyEvents/44444444
 Authorization: Bearer ya29.a0ARrdaM...{token}
 ```
 
@@ -651,7 +655,7 @@ No request body. No query parameters.
         "reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
         "domain": "googleapis.com",
         "metadata": {
-          "method": "google.analytics.admin.v1alpha.AnalyticsAdminService.DeleteKeyEvent",
+          "method": "google.analytics.admin.v1beta.AnalyticsAdminService.DeleteKeyEvent",
           "service": "analyticsadmin.googleapis.com"
         }
       }
@@ -663,16 +667,16 @@ No request body. No query parameters.
 **Pattern in gads CLI:** The CLI lists key events first (to get the `name` field), then calls delete using the `name`. The `eventName` string alone is NOT sufficient to delete — you must resolve it to a `name` first via list.
 
 ```python
-# Correct delete pattern:
+# Correct delete pattern (mirrors gads_lib/ga4.py::delete_key_event):
 # 1. List to find name
 events = list_key_events(pid)  # returns [{name: "properties/X/keyEvents/Y", eventName: "foo", ...}]
 match = next((e for e in events if e["eventName"] == target_event_name), None)
 if match:
-    delete_url = f"https://analyticsadmin.googleapis.com/v1alpha/{match['name']}"
+    delete_url = f"https://analyticsadmin.googleapis.com/v1beta/{match['name']}"
     requests.delete(delete_url, headers=headers)
 ```
 
-Source: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents
+Source: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents
 
 ---
 
@@ -854,7 +858,7 @@ Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
 ```
 `nextPageToken` is omitted (not null) when there are no more pages.
 
-Sources: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents/list
+Sources: https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/list
 
 ---
 
@@ -893,7 +897,7 @@ Also occurs when trying to combine incompatible dimensions and metrics. Use `che
         "reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
         "domain": "googleapis.com",
         "metadata": {
-          "method": "google.analytics.admin.v1alpha.AnalyticsAdminService.CreateKeyEvent",
+          "method": "google.analytics.admin.v1beta.AnalyticsAdminService.CreateKeyEvent",
           "service": "analyticsadmin.googleapis.com"
         }
       }
@@ -1044,29 +1048,33 @@ The gads CLI (`gads_lib/ga4.py`) currently uses:
 | `GET /v1beta/properties/{pid}/metadata` | Used — dimension/metric catalog |
 | `POST /v1beta/properties/{pid}:runReport` | Used — standard reports |
 | `POST /v1beta/properties/{pid}:runRealtimeReport` | Used — realtime reports |
-| `GET /v1alpha/properties/{pid}/keyEvents` | Used — list key events (pageSize=200) |
-| `POST /v1alpha/properties/{pid}/keyEvents` | Used — create key event |
-| `DELETE /v1alpha/{keyEvent.name}` | Used — delete key event |
+| `POST /v1beta/properties/{pid}:batchRunReports` | Used — `gads ga4 batch-report` (added gads-cli v3.7.0) |
+| `POST /v1beta/properties/{pid}:runPivotReport` | Used — `gads ga4 pivot-report` (added gads-cli v3.7.0) |
+| `POST /v1beta/properties/{pid}:checkCompatibility` | Used — `gads ga4 check-compatibility` (added gads-cli v3.7.0) |
+| `GET /v1beta/properties/{pid}/keyEvents` | Used — list key events (pageSize=200) — **migrated from v1alpha in gads-cli v3.8.2** |
+| `POST /v1beta/properties/{pid}/keyEvents` | Used — create key event — **migrated from v1alpha in gads-cli v3.8.2** |
+| `DELETE /v1beta/{keyEvent.name}` | Used — delete key event — **migrated from v1alpha in gads-cli v3.8.2** |
 
 **Gaps — endpoints not yet used by gads CLI:**
 
 | Endpoint | Notes |
 |----------|-------|
-| `batchRunReports` | Useful for fetching multiple date ranges or campaigns in one call; reduces quota overhead |
-| `runPivotReport` | Cross-tabulation reports; useful for campaign × device or source × medium breakdowns |
-| `batchRunPivotReports` | Batch version of pivot |
-| `checkCompatibility` | Validate dimension+metric combinations before sending a real report request |
+| `batchRunPivotReports` | Batch version of pivot — not wired up (single `runPivotReport` is) |
 | `audienceExports` (v1beta) | Export audience user lists for retargeting analysis |
 | `runFunnelReport` (v1alpha) | Multi-step funnel analysis (checkout steps, etc.) |
 | `reportTasks` (v1alpha) | Async large reports that exceed realtime API limits |
+| Conversion Reporting via `runReport` `conversionSpec` (v1alpha, **new 2026-04-23**) | Paid+organic conversion-performance rows inside a normal `runReport` call — see Developer Guide §16. Availability is per-property (Google is rolling it out); check `properties.getMetadata`'s new `conversions` field first |
 | Admin: `keyEvents.get` | Retrieve a single key event by name |
 | Admin: `keyEvents.patch` | Update `countingMethod` or `defaultValue` without delete+recreate |
 | Admin: Custom dimensions CRUD | `properties.customDimensions` — list/create/archive |
 | Admin: Custom metrics CRUD | `properties.customMetrics` — list/create/archive |
 | Admin: `accounts` / `properties` | Account-level listing and property provisioning |
 | Admin: `runAccessReport` | Audit who accessed GA4 data |
+| Admin: `dataRetentionSettings` get/update | Controls `eventDataRetention` / `userDataRetention` window (2mo/14mo/26-50mo on 360) |
+| Admin: `UpdateReportingIdentitySettings` (**new 2026-06-18**) | Controls Blended/Observed/Device-based reporting identity |
+| Admin: `GetUserProvidedDataSettings` (**new 2026-04-14**, v1alpha) | Enhanced Conversions / user-provided data collection config |
 
-**Migration opportunity:** Switch `key-events` commands from `v1alpha` Admin API to `v1beta` Admin API — same URL structure, just change the version segment. v1beta has stability guarantees that v1alpha does not.
+**Migration status:** `key-events` commands already run on `v1beta` Admin API (migrated from `v1alpha` in gads-cli v3.8.2 — see `gads_lib/ga4.py:18`). No further action needed for key events; this file previously described the switch as a pending "opportunity," which was stale.
 
 ---
 
@@ -1082,9 +1090,13 @@ The gads CLI (`gads_lib/ga4.py`) currently uses:
 | https://developers.google.com/analytics/devguides/reporting/data/v1/quotas | Quota limits (tokens/day, tokens/hour, concurrency) |
 | https://developers.google.com/analytics/devguides/config/admin/v1 | Admin API overview and version channels |
 | https://developers.google.com/analytics/devguides/config/admin/v1/rest | Admin API endpoint reference (v1beta + v1alpha) |
-| https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents | keyEvents resource (v1alpha) all methods |
-| https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents/list | keyEvents.list — pagination params and auth scopes |
-| https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents | keyEvents resource (v1beta) — confirms same methods available |
+| https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents | keyEvents resource (v1beta) — all methods; the version gads CLI actually calls (since v3.8.2) |
+| https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents/list | keyEvents.list — pagination params and auth scopes |
+| https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1alpha/properties.keyEvents | keyEvents resource (v1alpha) — same methods, kept for historical/compat reference only |
+| https://developers.google.com/analytics/devguides/config/admin/v1/changelog | Admin API changelog — confirms latest additions (`UpdateReportingIdentitySettings`, `can_edit`, `GetUserProvidedDataSettings`) |
+| https://developers.google.com/analytics/devguides/reporting/data/v1/changelog | Data API changelog — confirms Conversion Reporting addition (2026-04-23) |
+| https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties/runReport | `conversionSpec` field, `attributionModel` enum (Conversion Reporting, v1alpha) |
+| https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties/getDataRetentionSettings | `DataRetentionSettings` fields (`eventDataRetention`, `userDataRetention`, `resetUserDataOnNewActivity`) |
 
 ---
 
@@ -1748,37 +1760,46 @@ Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
 
 ### 12. Admin API v1alpha vs v1beta
 
-**Version comparison for key resources:**
+**Version comparison for key resources** (re-verified 2026-07-01):
 
 | Resource | v1beta | v1alpha | Notes |
 |----------|--------|---------|-------|
-| `properties.keyEvents` | Stable | Stable | Identical method set; prefer v1beta |
+| `properties.keyEvents` | Stable | Stable | Identical method set. **gads CLI uses v1beta** (migrated from v1alpha in v3.8.2) |
 | `properties.customDimensions` | Stable | Stable | Prefer v1beta |
 | `properties.customMetrics` | Stable | Stable | Prefer v1beta |
+| `properties.dataRetentionSettings` | Stable | Stable | `eventDataRetention` / `userDataRetention` / `resetUserDataOnNewActivity` — not used by gads CLI |
+| `properties.dataStreams` | Stable | Stable | Data stream CRUD |
+| `properties.measurementProtocolSecrets` | Stable | Stable | MP secret management |
+| `properties.firebaseLinks` / `googleAdsLinks` | Stable | Stable | Firebase / Ads linking |
+| `properties.reportingIdentitySettings` | Stable (**new method** `UpdateReportingIdentitySettings`, 2026-06-18) | — | Blended / Observed / Device-based reporting identity |
+| `accountSummaries.propertySummaries` | Stable (**`can_edit` field added**, 2026-06-18) | — | Indicates whether the caller can change property settings |
 | `accounts` | Stable | Stable | Account listing |
 | `properties` | Stable | Stable | Property management |
+| `properties.userProvidedDataSettings` | NOT present | Preview (**new method** `GetUserProvidedDataSettings`, 2026-04-14) | Enhanced Conversions config |
 | `properties.audiences` | NOT present | Preview | Audience definition CRUD |
 | `properties.bigQueryLinks` | NOT present | Preview | BigQuery export configuration |
 | `properties.channelGroups` | NOT present | Preview | Custom channel grouping |
-| `properties.eventCreateRules` | NOT present | Preview | Server-side event modification |
+| `properties.eventCreateRules` / `eventEditRules` | NOT present | Preview | Server-side event modification |
 | `properties.expandedDataSets` | NOT present | Preview | Audience-based data subsets |
 | `properties.accessBindings` | NOT present | Preview | Fine-grained user access |
+| `properties.subpropertyEventFilters` | NOT present | Preview | Subproperty provisioning + filters |
+| `properties.skadNetworkConversionValueSchemas` | NOT present | Preview | iOS SKAdNetwork mapping |
 
 **v1beta stability guarantee:** "No breaking changes are expected in this channel." v1alpha is an early-preview channel that may change without notice.
 
-**Migration recommendation:** For resources available in both versions (key events, custom dimensions, custom metrics), switch from v1alpha to v1beta by changing the base URL segment:
+**gads CLI migration status — DONE, not a pending recommendation:** `GA4_ADMIN_BASE` in `gads_lib/ga4.py` was switched from v1alpha to v1beta in gads-cli **v3.8.2**. All key-events methods now hit v1beta:
 
 ```
-# Before
+# Before (pre-v3.8.2)
 https://analyticsadmin.googleapis.com/v1alpha/properties/{pid}/keyEvents
 
-# After
+# After (v3.8.2+, current)
 https://analyticsadmin.googleapis.com/v1beta/properties/{pid}/keyEvents
 ```
 
-No other code changes needed — the method paths, request bodies, and response shapes are identical for these resources.
+No other code changes were needed — the method paths, request bodies, and response shapes are identical for these resources. `gads kb check` verifies `manifest.json` (`v1beta`) still matches the live `GA4_ADMIN_BASE` constant in code on every run.
 
-Sources: https://developers.google.com/analytics/devguides/config/admin/v1, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents
+Sources: https://developers.google.com/analytics/devguides/config/admin/v1, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents, https://developers.google.com/analytics/devguides/config/admin/v1/changelog
 
 ---
 
@@ -1959,3 +1980,56 @@ Source: https://developers.google.com/analytics/devguides/reporting/data/v1/rest
 - For bulk key event creation, handle 409 `ALREADY_EXISTS` as a no-op success, not a fatal error.
 
 Sources: https://developers.google.com/analytics/devguides/reporting/data/v1, https://developers.google.com/analytics/devguides/config/admin/v1
+
+---
+
+### 16. Conversion Reporting via `runReport` (v1alpha, new — 2026-04-23)
+
+**Not yet used by gads CLI.** Added to the Data API `v1alpha` on 2026-04-23 per the official changelog: `runReport` can now pull the same paid+organic "Conversion performance" rows shown in the GA4 UI's advertising section, inside a normal report request. **Availability is per-property** — the docs explicitly warn "this feature may not be available to your Google Analytics property" (Google is rolling it out gradually); check for it first via the new `conversions` field on `getMetadata`'s response before relying on it.
+
+**New request field — `conversionSpec` on `RunReportRequest`:**
+
+```json
+{
+  "dimensions": [{"name": "date"}],
+  "metrics": [{"name": "conversions"}],
+  "dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}],
+  "conversionSpec": {
+    "conversionActions": ["conversionActions/1234"],
+    "attributionModel": "DATA_DRIVEN"
+  }
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `conversionSpec.conversionActions` | string[] | Conversion action IDs to include, formatted `"conversionActions/{id}"`. Empty = all conversions. IDs come from the new `conversions` field in `getMetadata`'s response. |
+| `conversionSpec.attributionModel` | enum | `DATA_DRIVEN` (default if unspecified), `LAST_CLICK`, or `ATTRIBUTION_MODEL_UNSPECIFIED` |
+
+**New response field — `section` on `ResponseMetaData`:** distinguishes standard reporting rows (`SECTION_REPORT`) from conversion-reporting rows (`SECTION_ADVERTISING`) (unverified: exact enum member spelling — Google's own docs page did not render the full enum list when checked; treat as `SECTION_REPORT` / `SECTION_ADVERTISING` pending confirmation against a live response).
+
+**`getMetadata` additions:**
+- `conversions` field — array of `ConversionMetadata` objects mapping conversion action IDs to display names, so callers can discover valid `conversionActions` values.
+- `sections` field added to `DimensionMetadata` and `MetricMetadata` — indicates whether a given dimension/metric is valid for `SECTION_REPORT`, `SECTION_ADVERTISING`, or both.
+
+**Practical note for Talas:** this is v1alpha, per-property-gated, and overlaps ground the CLI already covers via Google Ads conversion data — no action needed unless GA4-native paid+organic conversion breakdowns (as opposed to Ads-API conversion data) become a specific requirement.
+
+Sources: https://developers.google.com/analytics/devguides/reporting/data/v1/changelog (2026-04-23 entry), https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1alpha/properties/runReport
+
+---
+
+### 17. Recent Admin API Additions Not Yet Used by gads CLI
+
+Confirmed via the official Admin API changelog (https://developers.google.com/analytics/devguides/config/admin/v1/changelog) as the most recent entries as of 2026-07-01:
+
+| Date | Addition | What it does |
+|------|----------|---------------|
+| 2026-06-18 | `UpdateReportingIdentitySettings` method (v1beta) | Update a property's reporting identity (Blended / Observed / Device-based) — affects how user counts and deduplication are modeled in reports |
+| 2026-06-18 | `can_edit` field on `PropertySummary` (v1beta, `accountSummaries.list`) | Indicates whether the calling credential has a role that permits changing settings on that property — useful for pre-flight permission checks before a mutation |
+| 2026-04-14 | `GetUserProvidedDataSettings` method + `UserProvidedDataSettings` resource (v1alpha) | Retrieve a property's user-provided data collection configuration (Enhanced Conversions style first-party data matching) |
+
+`properties.dataRetentionSettings` (get/update, v1beta — stable, exact addition date not confirmed by the changelog fetch) exposes `eventDataRetention` and `userDataRetention` as `RetentionDuration` enums (`TWO_MONTHS`, `FOURTEEN_MONTHS`, plus `TWENTY_SIX_MONTHS` / `THIRTY_EIGHT_MONTHS` / `FIFTY_MONTHS` for Analytics 360 event data only) and a `resetUserDataOnNewActivity` boolean. Not currently read or written by gads CLI; documented here since it surfaced during this refresh.
+
+None of the above are wired into `gads_lib/ga4.py` today — listed for future "add support" consideration, not as something already implemented.
+
+Sources: https://developers.google.com/analytics/devguides/config/admin/v1/changelog, https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties/getDataRetentionSettings

@@ -110,10 +110,11 @@ $PY -m pip install --quiet --user click requests google-auth google-auth-oauthli
 # ── Step 4: Detect platforms ────────────────────────────────
 step 4 6 "Detect AI platforms"
 
-HAS_CLAUDE=false; HAS_GSD=false
+HAS_CLAUDE=false; HAS_GSD=false; HAS_CODEX=false
 command -v claude &>/dev/null && HAS_CLAUDE=true && ok "Claude Code"
 command -v gsd    &>/dev/null && HAS_GSD=true    && ok "gsd-pi"
-$HAS_CLAUDE || $HAS_GSD || warn "No AI platforms found — standalone install"
+command -v codex  &>/dev/null && HAS_CODEX=true  && ok "Codex"
+$HAS_CLAUDE || $HAS_GSD || $HAS_CODEX || warn "No AI platforms found — standalone install"
 
 # ── Step 5: Wire agents + skills + hooks ─────────────────────
 step 5 6 "Install agents & skills"
@@ -298,6 +299,13 @@ if $HAS_GSD; then
   fi
 fi
 
+if $HAS_CODEX; then
+  # Codex reads AGENTS.md natively (the open agents.md convention) — there is
+  # no separate agent/skill directory format to wire the way Claude Code and
+  # gsd-pi have. Nothing to write; AGENTS.md at the CLI root already covers it.
+  ok "Codex detected — reads $CLI_DIR/AGENTS.md natively, no extra wiring needed"
+fi
+
 # ── Step 6: Auth ─────────────────────────────────────────────
 step 6 6 "Credentials"
 
@@ -318,6 +326,18 @@ if ! $SKIP_AUTH && [[ -t 0 ]]; then
   fi
 else
   echo "  Run: $CLI_DIR/gads auth setup"
+fi
+
+# ── Sibling-awareness (mads-cli) ─────────────────────────────
+echo ""
+MADS_PATH="$(command -v mads 2>/dev/null || true)"
+if [[ -n "$MADS_PATH" ]]; then
+  ok "mads-cli found on PATH ($MADS_PATH) — Meta (Facebook/Instagram) Ads"
+  echo -e "  ${D}gads-cli's doctor command will detect it automatically (sibling_cli field).${R}"
+else
+  echo -e "  ${CY}ℹ${R} Managing Meta (Facebook/Instagram) Ads too? Install the sister CLI, mads-cli:"
+  echo "    curl -fsSL https://raw.githubusercontent.com/talas9/mads-cli/main/scripts/install.sh | bash"
+  echo "    https://github.com/talas9/mads-cli"
 fi
 
 # ── Done ─────────────────────────────────────────────────────

@@ -516,6 +516,21 @@ def auth_revoke():
         click.echo("  No token to revoke.")
 
 
+def _svc_probe_detail(e):
+    """Render a service-probe exception as a short results-table detail string.
+
+    `get_credentials()` and the HTTP error-routing layer (`request_json()`)
+    raise `SystemExit` (not a plain `Exception`) for missing credentials and
+    classified API errors respectively. `str(SystemExit(5))` is just the exit
+    code ("5"), which is useless in a results table, so it is special-cased
+    here. The detailed diagnostic message was already printed to stderr by
+    the layer that raised it.
+    """
+    if isinstance(e, SystemExit):
+        return f"API/auth error (exit code {e.code}) — see message above for detail"
+    return str(e)[:100]
+
+
 @auth.command("test")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
 def auth_test(as_json):
@@ -528,8 +543,8 @@ def auth_test(as_json):
             creds = get_credentials()
             rows = run_gaql(creds, "SELECT customer.id FROM customer LIMIT 1")
             results.append({"service": "Google Ads", "status": "ok", "detail": f"Customer {CUSTOMER_ID} accessible"})
-        except Exception as e:
-            results.append({"service": "Google Ads", "status": "fail", "detail": str(e)[:100]})
+        except (Exception, SystemExit) as e:
+            results.append({"service": "Google Ads", "status": "fail", "detail": _svc_probe_detail(e)})
     else:
         results.append({"service": "Google Ads", "status": "skip", "detail": "CUSTOMER_ID or DEV_TOKEN not set"})
 
@@ -539,8 +554,8 @@ def auth_test(as_json):
         accts = gbp_list_accounts(creds)
         count = len(accts) if isinstance(accts, list) else 0
         results.append({"service": "Google Business Profile", "status": "ok", "detail": f"{count} account(s) found"})
-    except Exception as e:
-        msg = str(e)[:100]
+    except (Exception, SystemExit) as e:
+        msg = _svc_probe_detail(e)
         if "403" in msg:
             results.append({"service": "Google Business Profile", "status": "fail", "detail": "403 — re-run 'gads auth login --force' to add scope"})
         else:
@@ -552,8 +567,8 @@ def auth_test(as_json):
             creds = get_credentials()
             mc_get_account(creds)
             results.append({"service": "Merchant Center", "status": "ok", "detail": f"Account {MERCHANT_CENTER_ID} accessible"})
-        except Exception as e:
-            results.append({"service": "Merchant Center", "status": "fail", "detail": str(e)[:100]})
+        except (Exception, SystemExit) as e:
+            results.append({"service": "Merchant Center", "status": "fail", "detail": _svc_probe_detail(e)})
     else:
         results.append({"service": "Merchant Center", "status": "skip", "detail": "GOOGLE_MERCHANT_CENTER_ID not set"})
 
@@ -563,8 +578,8 @@ def auth_test(as_json):
             creds = get_credentials()
             ga4_get_metadata(creds, GA4_PROPERTY_ID)
             results.append({"service": "GA4", "status": "ok", "detail": f"Property {GA4_PROPERTY_ID} accessible"})
-        except Exception as e:
-            msg = str(e)[:100]
+        except (Exception, SystemExit) as e:
+            msg = _svc_probe_detail(e)
             if "403" in msg:
                 results.append({"service": "GA4", "status": "fail", "detail": "403 — enable Analytics API or re-run 'gads auth login --force'"})
             else:
@@ -578,8 +593,8 @@ def auth_test(as_json):
         sites = gsc_list_sites(creds)
         count = len(sites.get("siteEntry", []))
         results.append({"service": "Search Console", "status": "ok", "detail": f"{count} site(s) found"})
-    except Exception as e:
-        msg = str(e)[:100]
+    except (Exception, SystemExit) as e:
+        msg = _svc_probe_detail(e)
         if "403" in msg or "insufficient" in msg.lower():
             results.append({"service": "Search Console", "status": "fail", "detail": "403 — re-run 'gads auth login --force' to add webmasters scope"})
         else:
@@ -2147,6 +2162,13 @@ def _confirm_and_log(action, details, dry_run=False, yes=False):
     return True
 
 def _auto_log(action, details, campaign_name="", campaign_id=""):
+    """Best-effort changelog write; must never abort an already-successful mutation.
+
+    Note: `get_db()` raises `SystemExit(1)` (not a plain `Exception`) when the
+    local SQLite DB is missing — caught explicitly here alongside `Exception`
+    so a missing/not-yet-initialized DB (or any other local-logging failure)
+    never masks a live API mutation that already succeeded.
+    """
     try:
         import json as _json
         conn = get_db()
@@ -2157,7 +2179,7 @@ def _auto_log(action, details, campaign_name="", campaign_id=""):
             (ts, action, campaign_name, campaign_id, details, "", "gads-cli", "", "", _json.dumps(raw)))
         conn.commit()
         conn.close()
-    except Exception:
+    except (Exception, SystemExit):
         pass
 
 

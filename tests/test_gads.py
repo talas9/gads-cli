@@ -2743,3 +2743,110 @@ class TestErrorEnvelopes:
                 mc_get_account(fake_creds)
 
         assert exc_info.value.code == 5
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP G — SystemExit-escape hardening (audit: broad `except Exception` blocks
+# must not let SystemExit from get_db()/get_credentials() escape and abort an
+# already-successful operation or a per-service diagnostic loop) + OAuth
+# refresh-failure messaging.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAutoLogNeverAbortsOnDbFailure:
+    """`_auto_log()` is a best-effort changelog write. `get_db()` raises
+    SystemExit(1) (not a plain Exception) when the local DB is missing —
+    it must be swallowed too, or a missing DB would mask an already-successful
+    live mutation."""
+
+    def test_auto_log_swallows_systemexit_from_get_db(self):
+        from gads_lib.cli import _auto_log
+
+        with patch("gads_lib.cli.get_db", side_effect=SystemExit(1)):
+            # Must not raise — this is the whole point of the best-effort wrapper.
+            _auto_log("campaign_status", "999 -> PAUSED", campaign_id="999")
+
+    def test_campaign_status_still_reports_success_when_db_missing(self):
+        """End-to-end: the live mutation succeeds; the local changelog DB is
+        missing. The command must still exit 0 and print the success message
+        — not silently die inside the best-effort _auto_log() call."""
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        runner = CliRunner()
+        with patch("gads_lib.cli.get_credentials", return_value=MagicMock()), \
+             patch("gads_lib.cli.ads_mutate", return_value={"results": [{"resourceName": "customers/1/campaigns/999"}]}), \
+             patch("gads_lib.cli.get_db", side_effect=SystemExit(1)):
+            result = runner.invoke(cli, ["campaign", "status", "999", "PAUSED", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert "999" in result.output and "PAUSED" in result.output
+
+
+class TestAuthTestContinuesPastPerServiceSystemExit:
+    """`gads auth test` probes 5 services in independent try/except blocks.
+    `get_credentials()` / the HTTP error-routing layer raise SystemExit (not a
+    plain Exception) for missing creds / classified API errors. A SystemExit
+    from one service must not abort the whole diagnostic loop."""
+
+    def test_one_service_systemexit_does_not_abort_the_others(self):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        runner = CliRunner()
+        with patch("gads_lib.cli.get_credentials", return_value=MagicMock()), \
+             patch("gads_lib.cli.run_gaql", return_value=[{"customer": {"id": "123"}}]), \
+             patch("gads_lib.cli.gbp_list_accounts", side_effect=SystemExit(5)), \
+             patch("gads_lib.cli.mc_get_account", return_value={}), \
+             patch("gads_lib.cli.ga4_get_metadata", return_value={}), \
+             patch("gads_lib.cli.gsc_list_sites", return_value={"siteEntry": []}):
+            result = runner.invoke(cli, ["auth", "test", "--json"])
+
+        # NOTE: `--json` mode currently exits 0 regardless of per-service
+        # failures (only the human-readable path raises SystemExit(1) on
+        # failures) — that is pre-existing, separate behavior, not part of
+        # this test. What matters here is that the loop actually completed
+        # and printed a full per-service report instead of aborting after
+        # the first SystemExit.
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        services = {r["service"]: r for r in parsed}
+        assert services["Google Ads"]["status"] == "ok"
+        assert services["Google Business Profile"]["status"] == "fail"
+        assert services["Merchant Center"]["status"] == "ok"
+        assert services["GA4"]["status"] == "ok"
+        assert services["Search Console"]["status"] == "ok"
+
+
+class TestGetCredentialsRefreshFailure:
+    """get_credentials() must translate a revoked/expired refresh token into a
+    clear, actionable message (pointing at generate_token.py) and a stable
+    AUTH exit code, instead of leaking a raw google-auth exception repr."""
+
+    def test_refresh_error_gives_actionable_message_and_auth_exit_code(self, capsys):
+        from google.auth.exceptions import RefreshError
+        from gads_lib.auth import get_credentials
+        from gads_lib.output import EXIT_CODES
+
+        def fake_refresh(self, request):
+            raise RefreshError("invalid_grant: Token has been expired or revoked.")
+
+        fake_creds_json = json.dumps({
+            "token": "x", "refresh_token": "y", "client_id": "a",
+            "client_secret": "b", "token_uri": "https://oauth2.googleapis.com/token",
+        })
+
+        with patch("gads_lib.auth.CREDS_PATH") as mock_path, \
+             patch("google.oauth2.credentials.Credentials.expired",
+                   new_callable=__import__("unittest.mock", fromlist=["PropertyMock"]).PropertyMock,
+                   return_value=True), \
+             patch("google.oauth2.credentials.Credentials.refresh", fake_refresh), \
+             patch("builtins.open", MagicMock(return_value=io.StringIO(fake_creds_json))):
+            mock_path.exists.return_value = True
+            with pytest.raises(SystemExit) as exc_info:
+                get_credentials()
+
+        assert exc_info.value.code == EXIT_CODES["AUTH"]
+        stderr = capsys.readouterr().err
+        assert "generate_token.py" in stderr
+        assert "refresh" in stderr.lower()

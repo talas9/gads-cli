@@ -1,0 +1,125 @@
+[
+  {
+    "api": "Google Ads REST API",
+    "slug": "google-ads",
+    "current_version": "v24.2",
+    "base_url": "https://googleads.googleapis.com/{version}",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/adwords"
+    ],
+    "status": "active",
+    "sunset_date_or_null": null,
+    "kb_file": "google-ads.md"
+  },
+  {
+    "api": "Merchant API",
+    "slug": "merchant-api",
+    "current_version": "v1",
+    "base_url": "https://merchantapi.googleapis.com/{sub_api}/v1",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/content"
+    ],
+    "status": "active",
+    "sunset_date_or_null": "2026-08-18",
+    "kb_file": "merchant-api.md"
+  },
+  {
+    "api": "GA4 Data API",
+    "slug": "ga4",
+    "current_version": "v1beta",
+    "base_url": "https://analyticsdata.googleapis.com/v1beta",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/analytics.readonly",
+      "https://www.googleapis.com/auth/analytics.edit"
+    ],
+    "status": "active",
+    "sunset_date_or_null": null,
+    "kb_file": "ga4.md"
+  },
+  {
+    "api": "GA4 Admin API",
+    "slug": "ga4",
+    "current_version": "v1beta",
+    "base_url": "https://analyticsadmin.googleapis.com/v1beta",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/analytics.readonly",
+      "https://www.googleapis.com/auth/analytics.edit"
+    ],
+    "status": "active",
+    "sunset_date_or_null": null,
+    "kb_file": "ga4.md"
+  },
+  {
+    "api": "Google Business Profile - Account Management API",
+    "slug": "gbp",
+    "current_version": "v1.1",
+    "base_url": "https://mybusinessaccountmanagement.googleapis.com/v1",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/business.manage"
+    ],
+    "status": "active",
+    "sunset_date_or_null": null,
+    "kb_file": "gbp.md"
+  },
+  {
+    "api": "Google Business Profile - Business Information API",
+    "slug": "gbp",
+    "current_version": "v1",
+    "base_url": "https://mybusinessbusinessinformation.googleapis.com/v1",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/business.manage"
+    ],
+    "status": "active",
+    "sunset_date_or_null": null,
+    "kb_file": "gbp.md"
+  },
+  {
+    "api": "Google Business Profile - Performance API",
+    "slug": "gbp",
+    "current_version": "v1",
+    "base_url": "https://businessprofileperformance.googleapis.com/v1",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/business.manage"
+    ],
+    "status": "active",
+    "sunset_date_or_null": null,
+    "kb_file": "gbp.md"
+  },
+  {
+    "api": "Google Business Profile - Legacy My Business v4 (Reviews/Posts)",
+    "slug": "gbp",
+    "current_version": "v4",
+    "base_url": "https://mybusiness.googleapis.com/v4",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/business.manage"
+    ],
+    "status": "legacy-active",
+    "sunset_date_or_null": null,
+    "kb_file": "gbp.md"
+  },
+  {
+    "api": "Google Search Console API",
+    "slug": "search-console",
+    "current_version": "v3",
+    "base_url": "https://www.googleapis.com/webmasters/v3",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/webmasters.readonly",
+      "https://www.googleapis.com/auth/webmasters"
+    ],
+    "status": "active",
+    "sunset_date_or_null": null,
+    "kb_file": "search-console.md"
+  },
+  {
+    "api": "Data Manager API",
+    "slug": "data-manager",
+    "current_version": "v1.7",
+    "base_url": "https://datamanager.googleapis.com/v1",
+    "oauth_scopes": [
+      "https://www.googleapis.com/auth/datamanager"
+    ],
+    "status": "active",
+    "sunset_date_or_null": null,
+    "kb_file": "data-manager-api.md"
+  }
+]

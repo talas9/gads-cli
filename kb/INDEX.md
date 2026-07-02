@@ -16,6 +16,7 @@ Machine-readable summary: [`manifest.json`](./manifest.json).
 | 3 | **GA4 Data + Admin APIs** | [ga4.md](./ga4.md) | Data API v1beta (stable); Admin API v1beta (stable). CLI uses Data v1beta + Admin **v1beta** for key events (migrated from v1alpha in v3.8.0). | Active. No sunset announced. |
 | 4 | **Google Business Profile** (suite) | [gbp.md](./gbp.md) | Account Mgmt v1, Business Information v1, Performance v1 (all active); legacy My Business v4 for Reviews/Posts | Mixed. v1 APIs active. Legacy **v4 Reviews/Posts still active, no sunset announced**; most other v4 resources already sunset. API access requires **allowlist approval** (un-allowlisted projects get HTTP 429 at 0 quota). |
 | 5 | **Search Console API** | [search-console.md](./search-console.md) | `webmasters/v3` REST endpoints (active); discovery name now `searchconsole` v1; URL Inspection on `searchconsole.googleapis.com/v1` | Active. The `webmasters` → `searchconsole` rename was discovery-level only; REST URLs unchanged. CLI's `webmasters/v3` base is correct. |
+| 6 | **Data Manager API** | [data-manager-api.md](./data-manager-api.md) | v1.7 (2026-05-28); CLI calls the unversioned-minor `/v1/` path | Active. GA since v1.3 (2025-10-06). Modern replacement path for offline conversion/audience uploads — see Known Limitation in the KB file: response is async, `{requestId}`-only, no per-event/-member status. |
 
 ## OAuth scopes at a glance
 
@@ -26,6 +27,7 @@ Machine-readable summary: [`manifest.json`](./manifest.json).
 | GA4 | `analytics.readonly` (reads); `analytics.edit` (Admin key-event writes) |
 | GBP | `https://www.googleapis.com/auth/business.manage` |
 | Search Console | `webmasters.readonly` (reads); `webmasters` (writes) |
+| Data Manager API | `https://www.googleapis.com/auth/datamanager` |
 
 ## KB expansion status (v3.8.0)
 
@@ -41,7 +43,7 @@ Each KB file now contains both an **endpoint reference** section and a comprehen
 
 ## Top coverage gaps (feed the next "add support" task)
 
-- **Google Ads:** `uploadClickConversions` / `uploadCallConversions` (ConversionUploadService), conversion adjustment upload, offline job status polling, `GoogleAdsFieldService` (GAQL field compatibility), audience definition service, PMax asset group management.
+- **Google Ads:** conversion adjustment upload, `GoogleAdsFieldService` (GAQL field compatibility), audience definition service, PMax asset group management. **Resolved:** `uploadClickConversions` / `uploadCallConversions` (legacy ConversionUploadService, still supported) now sit alongside the modern **Data Manager API** path (`gads data-manager conversion-ingest` / `audience-upload` — see [data-manager-api.md](./data-manager-api.md)); the two are parallel, not a replacement — legacy `conversion upload` / `audience upload` are unchanged and still the only paths with synchronous-ish feedback (partialFailureError / job-status polling).
 - **Merchant API:** dataSource fileUploads status.
 - **GA4:** `runFunnelReport`, Admin `keyEvents.patch`.
 - **GBP:** Google-suggested location updates. **Resolved:** `fetchMultiDailyMetricsTimeSeries` correct method name now documented in gbp.md Developer Guide.

@@ -82,6 +82,13 @@ from gads_lib import (
 
 from gads_lib import __version__
 from gads_lib.gsc import gsc_list_sites, gsc_search_analytics, gsc_list_sitemaps, gsc_url_inspect
+from gads_lib.datamanager import (
+    datamanager_ingest_events,
+    datamanager_ingest_audience_members,
+    build_user_identifiers,
+    MAX_EVENTS_PER_REQUEST,
+    MAX_AUDIENCE_MEMBERS_PER_REQUEST,
+)
 from gads_lib.kb import check_drift, list_kb_files, show_kb_file, load_manifest
 from gads_lib.output import EXIT_CODES, print_error
 from gads_lib.catalog import build_catalog
@@ -2150,6 +2157,11 @@ def report_group():
     """Specialized reports (geo, hourly, devices, search terms)."""
     pass
 
+@cli.group("data-manager")
+def data_manager_group():
+    """Data Manager API — modern events/audience ingestion (events:ingest, audienceMembers:ingest)."""
+    pass
+
 
 # ── Helpers ──────────────────────────────────────────────────
 
@@ -3092,6 +3104,223 @@ def audience_job_status(job_id, as_json):
     click.echo(f"  User list:   {meta.get('userList','')}")
     if j.get("failureReason"):
         click.secho(f"  Failure:     {j['failureReason']}", fg="red")
+
+
+# ── Data Manager API commands ────────────────────────────────
+
+def _load_and_validate_events(events_path):
+    """Parse a JSON-lines events file for `data-manager conversion-ingest`.
+
+    Returns the list of event dicts. Exits with SystemExit(VALIDATION) on
+    malformed JSON, a non-object line, an empty file, or any event missing
+    the de-facto-required `eventTimestamp` field -- this is the "structural"
+    validation `--dry-run` performs with zero network calls, and it also
+    runs before a live call so a bad batch never reaches the API.
+    """
+    import json as _json
+
+    events = []
+    with open(events_path, encoding="utf-8") as f:
+        for i, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = _json.loads(line)
+            except _json.JSONDecodeError as exc:
+                click.secho(f"✗ Line {i}: invalid JSON — {exc}", fg="red", err=True)
+                raise SystemExit(EXIT_CODES["VALIDATION"])
+            if not isinstance(obj, dict):
+                click.secho(f"✗ Line {i}: expected a JSON object, got {type(obj).__name__}", fg="red", err=True)
+                raise SystemExit(EXIT_CODES["VALIDATION"])
+            events.append(obj)
+
+    if not events:
+        click.secho("✗ No events found in file", fg="red", err=True)
+        raise SystemExit(EXIT_CODES["VALIDATION"])
+
+    missing_timestamp = [i for i, e in enumerate(events, start=1) if not e.get("eventTimestamp")]
+    if missing_timestamp:
+        shown = missing_timestamp[:10]
+        suffix = "..." if len(missing_timestamp) > 10 else ""
+        click.secho(
+            f"✗ {len(missing_timestamp)} event(s) missing required field 'eventTimestamp' "
+            f"(lines: {shown}{suffix})",
+            fg="red", err=True,
+        )
+        raise SystemExit(EXIT_CODES["VALIDATION"])
+
+    return events
+
+
+@data_manager_group.command("conversion-ingest")
+@click.argument("events_path", type=click.Path(exists=True))
+@click.option("--action-id", required=True, help="Google Ads conversion action ID (bare ID, not a full resource name) -- becomes the Destination's productDestinationId.")
+@click.option("--batch-size", type=int, default=MAX_EVENTS_PER_REQUEST, help=f"Max events per API call (default/max: {MAX_EVENTS_PER_REQUEST}).")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def data_manager_conversion_ingest(events_path, action_id, batch_size, dry_run, yes, as_json):
+    """Ingest conversion events via the Data Manager API (events:ingest).
+
+    EVENTS_PATH is a JSON-lines file: one Event object per line, e.g.:
+    \b
+      {"eventTimestamp": "2026-01-01T10:00:00+04:00", "transactionId": "abc123",
+       "adIdentifiers": {"gclid": "Cj0..."}, "conversionValue": 30.0, "currency": "AED"}
+
+    \b
+    NOTE: The Data Manager API response is asynchronous. A 200 with a
+    requestId means the request was accepted -- NOT that every event was
+    successfully matched or recorded. There is no per-event success/failure
+    detail in this response (unlike the legacy `conversion upload` command's
+    partialFailureError).
+    """
+    enforce_allowed_caller()
+
+    if batch_size < 1 or batch_size > MAX_EVENTS_PER_REQUEST:
+        click.secho(f"✗ --batch-size must be between 1 and {MAX_EVENTS_PER_REQUEST}", fg="red", err=True)
+        raise SystemExit(EXIT_CODES["VALIDATION"])
+
+    events = _load_and_validate_events(events_path)
+    batches = [events[i:i + batch_size] for i in range(0, len(events), batch_size)]
+    action_desc = f"ingest {len(events)} conversion events ({len(batches)} batch(es)) → action-id {action_id}"
+
+    if dry_run:
+        # Structural validation is already complete (parsing + eventTimestamp
+        # check above) with zero network calls. Handled directly here (rather
+        # than via _confirm_and_log's shared dry-run branch) so --json mode
+        # emits clean, parseable JSON with no interleaved yellow text.
+        if as_json:
+            return print_json({
+                "status": "dry_run",
+                "event_count": len(events),
+                "batch_size": batch_size,
+                "batch_count": len(batches),
+            })
+        click.secho(f"  DRY RUN: {action_desc}", fg="yellow")
+        return
+
+    if not _confirm_and_log(action_desc, "data-manager conversion-ingest", False, yes):
+        return
+
+    creds = get_credentials()
+    batch_results = []
+    for batch in batches:
+        result = datamanager_ingest_events(creds, batch, action_id, as_json=as_json)
+        request_id = result.get("requestId", "")
+        batch_results.append({"requestId": request_id, "event_count": len(batch)})
+        if not as_json:
+            click.echo(f"  Batch requestId: {request_id}  ({len(batch)} events)")
+
+    note = (
+        f"Submitted {len(events)} events in {len(batches)} batch(es) — "
+        "ingestion is asynchronous, no per-event status available in this response."
+    )
+    _auto_log(
+        "datamanager_conversion_ingest",
+        f"{len(events)} events in {len(batches)} batch(es) → action-id={action_id}",
+    )
+
+    if as_json:
+        return print_json({
+            "status": "submitted",
+            "event_count": len(events),
+            "batch_count": len(batches),
+            "batches": batch_results,
+            "note": note,
+        })
+    click.secho(f"\n✓ {note}", fg="green")
+
+
+@data_manager_group.command("audience-upload")
+@click.argument("csv_path", type=click.Path(exists=True))
+@click.option("--list-resource-name", required=True, help="Google Ads Customer Match user-list ID (bare ID) -- becomes the Destination's productDestinationId.")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def data_manager_audience_upload(csv_path, list_resource_name, dry_run, yes, as_json):
+    """Upload a CSV of contacts to a Customer Match audience via the Data Manager API.
+
+    CSV format: Phone,Email,First Name,Last Name,Country (same shape as `gads audience upload`).
+
+    \b
+    Only phone and email identifiers are hashed and sent — Data Manager's
+    address-based identifier requires a postal code this CSV shape does not
+    carry, so the name/country columns are read but not used for matching.
+    All PII is SHA-256 hashed (hex) before upload.
+
+    \b
+    This is a NEW, parallel path alongside the existing `audience upload`
+    command (OfflineUserDataJobService) — it does not replace it.
+
+    \b
+    NOTE: The Data Manager API response is asynchronous. A 200 with a
+    requestId means the request was accepted -- NOT that every member was
+    matched. There is no per-row success/failure detail in this response.
+    """
+    enforce_allowed_caller()
+
+    import csv as _csv
+
+    members = []
+    skipped = 0
+    with open(csv_path, newline="", encoding="utf-8-sig", errors="replace") as f:
+        for row in _csv.DictReader(f):
+            ids = build_user_identifiers(phone=row.get("Phone", ""), email=row.get("Email", ""))
+            if ids:
+                members.append({"userData": {"userIdentifiers": ids}})
+            else:
+                skipped += 1
+
+    if not members:
+        click.secho("✗ No valid phone/email identifiers found in CSV", fg="red", err=True)
+        raise SystemExit(EXIT_CODES["VALIDATION"])
+
+    if len(members) > MAX_AUDIENCE_MEMBERS_PER_REQUEST:
+        click.secho(
+            f"✗ {len(members)} members exceeds the {MAX_AUDIENCE_MEMBERS_PER_REQUEST}/request "
+            "Data Manager limit — split the CSV before retrying.",
+            fg="red", err=True,
+        )
+        raise SystemExit(EXIT_CODES["VALIDATION"])
+
+    action_desc = f"upload {len(members)} audience members ({skipped} skipped) → {list_resource_name}"
+
+    if dry_run:
+        # Structural validation (identifier extraction + row-count) is already
+        # complete above with zero network calls. Handled directly here
+        # (rather than via _confirm_and_log's shared dry-run branch) so
+        # --json mode emits clean, parseable JSON with no interleaved text.
+        if as_json:
+            return print_json({"status": "dry_run", "member_count": len(members), "skipped_rows": skipped})
+        click.secho(f"  DRY RUN: {action_desc}", fg="yellow")
+        return
+
+    if not _confirm_and_log(action_desc, "data-manager audience-upload", False, yes):
+        return
+
+    creds = get_credentials()
+    result = datamanager_ingest_audience_members(creds, members, list_resource_name, as_json=as_json)
+    request_id = result.get("requestId", "")
+
+    note = "Ingestion is asynchronous — no per-member match status available in this response."
+    _auto_log(
+        "datamanager_audience_upload",
+        f"{len(members)} members ({skipped} skipped) → {list_resource_name}, requestId={request_id}",
+    )
+
+    if as_json:
+        return print_json({
+            "status": "submitted",
+            "member_count": len(members),
+            "skipped_rows": skipped,
+            "requestId": request_id,
+            "note": note,
+        })
+    click.secho(
+        f"\n✓ Submitted {len(members)} audience members ({skipped} skipped, requestId={request_id}) — {note}",
+        fg="green",
+    )
 
 
 # ── Report commands ──────────────────────────────────────────

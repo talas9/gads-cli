@@ -34,6 +34,7 @@ python generate_token.py
 | `asset` | `list`, `sitelink`, `callout`, `call` | Asset management and extensions (two-step creation) | Yes |
 | `conversion` | `list`, `create`, `set-primary`, `tag`, `perf`, `upload` | Conversion tracking, Primary/Secondary toggling, and offline upload | Yes |
 | `audience` | `list`, `create`, `upload`, `job-status` | Customer Match lists and CSV upload | Yes |
+| `data-manager` | `conversion-ingest`, `audience-upload` | Data Manager API — modern async events/audience ingestion, parallel to `conversion upload` / `audience upload` | No |
 | `report` | `geo`, `hourly`, `devices`, `search-terms` | Specialized performance breakdowns | Yes |
 | `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily`, `batch-reviews`, `local-posts`, `create-post`, `delete-post` | Google Business Profile management + performance analytics + local posts CRUD | No (except `ads-perf`, `ads-daily`) |
 | `gsc` | `sites`, `queries`, `pages`, `performance`, `inspect`, `sitemaps` | Google Search Console — queries, pages, daily performance, URL Inspection API, sitemaps | No |
@@ -70,6 +71,13 @@ python generate_token.py
   - `analytics.edit` — required for `key-events create`, `key-events bulk`, `key-events delete` (uses the GA4 Admin API). The project's `tools/generate_token.py` and `gads-cli/generate_token.py` both include this scope already; if you see `403 Forbidden` on write calls, regenerate the token.
 - **APIs to enable:** GA4 Data API (`analyticsdata.googleapis.com`) for reporting; GA4 Admin API (`analyticsadmin.googleapis.com`) for key events.
 - **Credentials:** `GOOGLE_GA4_PROPERTY_ID`
+
+### Data Manager API Commands
+- **Developer token:** NOT needed, no `login-customer-id` header (that "acting as" relationship is expressed in the JSON body's `Destination.loginAccount` instead — see `kb/data-manager-api.md`)
+- **OAuth scopes:** `https://www.googleapis.com/auth/datamanager` — added to `generate_token.py`'s unified scope list; existing tokens must be regenerated (`python generate_token.py`) to pick it up
+- **APIs to enable:** Data Manager API (`datamanager.googleapis.com`)
+- **Credentials:** reuses `GOOGLE_ADS_CUSTOMER_ID` / `GOOGLE_ADS_LOGIN_CUSTOMER_ID` (built into the request body's `Destination`, not headers)
+- **Important:** responses are asynchronous — `{"requestId": "..."}` only, no per-event/-member success confirmation. See `kb/data-manager-api.md`.
 
 ## Common GAQL Patterns
 
@@ -125,7 +133,7 @@ GADS_SNAPSHOTS_DIR=snapshots
 gads-cli/
 ├── gads                     # Main CLI entry point (thin shim)
 ├── gads_lib/
-│   ├── cli.py              # Click command groups and entry point (108 commands)
+│   ├── cli.py              # Click command groups and entry point (110 commands)
 │   ├── config.py           # Environment-driven configuration (Ads v24 default)
 │   ├── auth.py             # OAuth credential management + refresh
 │   ├── ads.py              # Google Ads REST client + GAQL runner (v24)
@@ -133,6 +141,7 @@ gads-cli/
 │   ├── gsc.py              # Search Console client (webmasters/v3 + URL Inspection v1)
 │   ├── merchant.py         # Merchant Center client (Merchant API v1)
 │   ├── ga4.py              # GA4 Data API v1beta + Admin API v1beta
+│   ├── datamanager.py      # Data Manager API client (events:ingest, audienceMembers:ingest)
 │   ├── catalog.py          # Live Click-tree catalog emitter (gads catalog --json)
 │   ├── dbread.py           # SELECT-only history-DB passthrough (gads db / changelog / decisions / milestones)
 │   ├── analyze/            # 5 read-only analysis modules
@@ -169,7 +178,7 @@ gads-cli/
 
 4. **Sitelink finalUrls placement** — when creating a sitelink asset, `finalUrls` must be at the top level of the create object, NOT nested inside `sitelinkAsset`. Nesting causes silent URL drops.
 
-5. **Customer Match uploads and April 2026 deprecation** — starting April 1, 2026, `OfflineUserDataJobService` uploads fail if your token has never sent a successful Customer Match request. Pre-upload before that date or switch to Data Manager API.
+5. **Customer Match uploads and April 2026 deprecation** — starting April 1, 2026, `OfflineUserDataJobService` uploads (`audience upload`) fail if your token has never sent a successful Customer Match request. Pre-upload before that date, or use `gads data-manager audience-upload` — the modern Data Manager API path (`gads_lib/datamanager.py`, `kb/data-manager-api.md`), unaffected by this deprecation. It's a parallel command, not an in-place replacement: same CSV shape (`Phone,Email,First Name,Last Name,Country`), but its `events:ingest`/`audienceMembers:ingest` response is asynchronous (`{requestId}` only, no per-row confirmation) unlike the legacy job-status-pollable path.
 
 6. **Asset creation is two-step** — create the asset via `assets:mutate`, then link it to the campaign via `campaignAssets:mutate`. Cannot do both in one call.
 

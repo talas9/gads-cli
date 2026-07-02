@@ -147,6 +147,8 @@ def classify_api_error(status_code, response_text, url=""):
             scope = "https://www.googleapis.com/auth/business.manage"
         elif "googleads" in url_lower or "adwords" in url_lower:
             scope = "https://www.googleapis.com/auth/adwords"
+        elif "datamanager" in url_lower:
+            scope = "https://www.googleapis.com/auth/datamanager"
         else:
             scope = "unknown (check kb/manifest.json)"
 

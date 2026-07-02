@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.10.0] - 2026-07-02
+
+### Added
+
+- **Data Manager API support** (`gads_lib/datamanager.py`, new): `datamanager_ingest_events()` (POST `/v1/events:ingest`) and `datamanager_ingest_audience_members()` (POST `/v1/audienceMembers:ingest`), plus `build_user_identifiers()` reusing the existing SHA-256 phone/email hashing from `gads_lib/ads.py`. Uses `get_bearer_headers()` — no developer-token / login-customer-id headers; the MCC "acting as" relationship is instead expressed via `Destination.loginAccount` in the JSON body.
+- **New `data-manager` command group** in `gads_lib/cli.py`:
+  - `gads data-manager conversion-ingest EVENTS_PATH --action-id ID [--batch-size 2000] [--dry-run] [--yes] [--json]` — JSON-lines input (one Event object per line), auto-chunks into ≤2000-event batches, prints each batch's `requestId`. `--dry-run` validates structurally (event count, batch-size, required `eventTimestamp` field) with zero network calls.
+  - `gads data-manager audience-upload CSV_PATH --list-resource-name NAME [--dry-run] [--yes] [--json]` — same CSV shape as `audience upload` (`Phone,Email,First Name,Last Name,Country`); a **new, parallel path** alongside the existing `audience upload` (OfflineUserDataJobService) command, not a replacement.
+  - Both commands are **additive only** — the legacy `conversion upload` and `audience upload` commands are unchanged. Both are worded to never claim false per-event/-member success: the Data Manager API's response is asynchronous (`{"requestId": "..."}` only), so both commands report *"N submitted — ingestion is asynchronous, no per-item status available in this response"* instead.
+- **`https://www.googleapis.com/auth/datamanager` OAuth scope** added to `generate_token.py`'s unified `SCOPES` list (same credential set as every other Google service this CLI talks to — verified via `gcloud services enable datamanager.googleapis.com` succeeding with no dedicated-project requirement). **Existing tokens must be regenerated** (`python generate_token.py`) to pick up the new scope.
+- **`kb/data-manager-api.md`** (new) — full Developer Guide: `Destination`/`Event`/`AudienceMember`/`UserData`/`UserIdentifier`/`Consent`/`Encoding` schemas (verified against official reference pages), quotas, and a Known Limitation callout on the async `{requestId}`-only response. `kb/manifest.json` and `kb/INDEX.md` updated accordingly (OAuth-scopes table, coverage-gaps reword — Data Manager now covers the modern conversion/audience-upload path alongside the still-supported legacy endpoints).
+- **20 new offline pytest tests** across `TestDatamanagerIngestEvents`, `TestDatamanagerIngestAudienceMembers`, `TestBuildUserIdentifiers`, `TestDataManagerConversionIngestCli`, `TestDataManagerAudienceUploadCli` — including a dedicated assertion that CLI output never claims per-event/-member success, and `--dry-run` tests confirming zero `requests.request` calls.
+
+### Fixed
+
+- **`gads_lib/output.py::classify_api_error()`** — added a `datamanager` URL branch so an `INSUFFICIENT_AUTHENTICATION_SCOPES` error on a `datamanager.googleapis.com` call correctly reports `https://www.googleapis.com/auth/datamanager` as the missing scope (previously fell through to `"unknown (check kb/manifest.json)"`).
+- **`.gitignore`'s blanket `*.json` rule was silently excluding `kb/manifest.json` from version control** (discovered while adding the Data Manager entry — `git ls-files` confirmed the file had never been committed, meaning a fresh clone/CI checkout has no `kb/manifest.json` at all, which every `TestKBManifest*` test depends on). Added a `!kb/manifest.json` exception, matching the existing `!pyproject.toml` / `!.env.example` pattern.
+
+### Changed
+
+- Test suite expanded from 235 → 255 tests (all passing).
+- `tests/test_gads.py::TestVersion` updated to assert v3.10.0.
+
 ## [3.9.1] - 2026-06-25
 
 ### Fixed

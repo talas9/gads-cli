@@ -533,13 +533,13 @@ class TestVersion:
                 f"Version part {part!r} is not numeric in {gads_lib.__version__!r}"
             )
 
-    def test_version_is_3_9_1(self):
-        """gads_lib.__version__ == '3.9.1'."""
+    def test_version_is_3_10_0(self):
+        """gads_lib.__version__ == '3.10.0'."""
         import gads_lib
 
-        assert gads_lib.__version__ == "3.9.1", (
-            f"Expected version 3.9.1, got {gads_lib.__version__!r}. "
-            "Bump __version__ in gads_lib/__init__.py when releasing v3.9.1."
+        assert gads_lib.__version__ == "3.10.0", (
+            f"Expected version 3.10.0, got {gads_lib.__version__!r}. "
+            "Bump __version__ in gads_lib/__init__.py when releasing v3.10.0."
         )
 
 
@@ -2850,3 +2850,378 @@ class TestGetCredentialsRefreshFailure:
         stderr = capsys.readouterr().err
         assert "generate_token.py" in stderr
         assert "refresh" in stderr.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GROUP H — Data Manager API (gads_lib/datamanager.py + `gads data-manager *`)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDatamanagerIngestEvents:
+    """datamanager_ingest_events — POST /v1/events:ingest."""
+
+    def test_url_contains_events_ingest(self, fake_creds):
+        from gads_lib.datamanager import datamanager_ingest_events
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"requestId": "req-1"})
+        fake_resp.json.return_value = {"requestId": "req-1"}
+
+        events = [{"eventTimestamp": "2026-01-01T10:00:00+04:00", "adIdentifiers": {"gclid": "abc"}}]
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            datamanager_ingest_events(fake_creds, events, "999")
+
+        called_url = mock_req.call_args[0][1]
+        assert "events:ingest" in called_url
+        assert "datamanager.googleapis.com" in called_url
+
+    def test_body_has_destinations_and_events(self, fake_creds):
+        from gads_lib.datamanager import datamanager_ingest_events
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"requestId": "req-1"})
+        fake_resp.json.return_value = {"requestId": "req-1"}
+
+        events = [
+            {"eventTimestamp": "2026-01-01T10:00:00+04:00", "adIdentifiers": {"gclid": "abc"}},
+            {"eventTimestamp": "2026-01-02T10:00:00+04:00", "adIdentifiers": {"gclid": "def"}},
+        ]
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            datamanager_ingest_events(fake_creds, events, "999")
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "destinations" in sent_body
+        assert "events" in sent_body
+        assert len(sent_body["events"]) == 2
+        assert sent_body["destinations"][0]["productDestinationId"] == "999"
+        assert sent_body["destinations"][0]["operatingAccount"]["accountType"] == "GOOGLE_ADS"
+
+    def test_uses_bearer_headers_not_ads_headers(self, fake_creds):
+        """Data Manager needs only Authorization + Content-Type -- no developer-token
+        / login-customer-id headers (those are Ads-REST-specific)."""
+        from gads_lib.datamanager import datamanager_ingest_events
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"requestId": "req-1"})
+        fake_resp.json.return_value = {"requestId": "req-1"}
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            datamanager_ingest_events(fake_creds, [{"eventTimestamp": "2026-01-01T10:00:00+04:00"}], "999")
+
+        sent_headers = mock_req.call_args[1]["headers"]
+        assert "developer-token" not in sent_headers
+        assert "login-customer-id" not in sent_headers
+        assert sent_headers["Authorization"] == f"Bearer {fake_creds.token}"
+
+    def test_raises_valueerror_over_max_events(self, fake_creds):
+        from gads_lib.datamanager import datamanager_ingest_events, MAX_EVENTS_PER_REQUEST
+
+        events = [{"eventTimestamp": "2026-01-01T10:00:00+04:00"}] * (MAX_EVENTS_PER_REQUEST + 1)
+
+        with patch("requests.request") as mock_req:
+            with pytest.raises(ValueError):
+                datamanager_ingest_events(fake_creds, events, "999")
+
+        assert not mock_req.called
+
+
+class TestDatamanagerIngestAudienceMembers:
+    """datamanager_ingest_audience_members — POST /v1/audienceMembers:ingest."""
+
+    def test_url_contains_audience_members_ingest(self, fake_creds):
+        from gads_lib.datamanager import datamanager_ingest_audience_members
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"requestId": "req-2"})
+        fake_resp.json.return_value = {"requestId": "req-2"}
+
+        members = [{"userData": {"userIdentifiers": [{"emailAddress": "hash"}]}}]
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            datamanager_ingest_audience_members(fake_creds, members, "888")
+
+        called_url = mock_req.call_args[0][1]
+        assert "audienceMembers:ingest" in called_url
+        assert "datamanager.googleapis.com" in called_url
+
+    def test_body_has_destinations_and_audience_members(self, fake_creds):
+        from gads_lib.datamanager import datamanager_ingest_audience_members
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.text = json.dumps({"requestId": "req-2"})
+        fake_resp.json.return_value = {"requestId": "req-2"}
+
+        members = [{"userData": {"userIdentifiers": [{"emailAddress": "hash"}]}}]
+
+        with patch("requests.request", return_value=fake_resp) as mock_req:
+            datamanager_ingest_audience_members(fake_creds, members, "888")
+
+        sent_body = mock_req.call_args[1]["json"]
+        assert "destinations" in sent_body
+        assert "audienceMembers" in sent_body
+        assert sent_body["destinations"][0]["productDestinationId"] == "888"
+
+    def test_raises_valueerror_over_max_members(self, fake_creds):
+        from gads_lib.datamanager import (
+            datamanager_ingest_audience_members,
+            MAX_AUDIENCE_MEMBERS_PER_REQUEST,
+        )
+
+        members = [{"userData": {"userIdentifiers": [{"emailAddress": "hash"}]}}] * (
+            MAX_AUDIENCE_MEMBERS_PER_REQUEST + 1
+        )
+
+        with patch("requests.request") as mock_req:
+            with pytest.raises(ValueError):
+                datamanager_ingest_audience_members(fake_creds, members, "888")
+
+        assert not mock_req.called
+
+
+class TestBuildUserIdentifiers:
+    """build_user_identifiers — SHA-256 hex hashing of phone/email for Data Manager."""
+
+    def test_phone_and_email_hashed(self):
+        from gads_lib.datamanager import build_user_identifiers
+
+        ids = build_user_identifiers(phone="+971501234567", email="User@Example.com")
+        keys = {list(i.keys())[0] for i in ids}
+        assert keys == {"phoneNumber", "emailAddress"}
+        for i in ids:
+            val = list(i.values())[0]
+            assert len(val) == 64  # sha256 hex digest length
+            assert val == val.lower()
+
+    def test_invalid_phone_and_no_email_returns_empty(self):
+        from gads_lib.datamanager import build_user_identifiers
+
+        assert build_user_identifiers(phone="123", email="") == []
+        assert build_user_identifiers(phone=None, email=None) == []
+
+    def test_email_without_at_sign_skipped(self):
+        from gads_lib.datamanager import build_user_identifiers
+
+        ids = build_user_identifiers(phone=None, email="not-an-email")
+        assert ids == []
+
+
+class TestDataManagerConversionIngestCli:
+    """`gads data-manager conversion-ingest` — CLI-level behavior."""
+
+    def test_cli_help_exits_0(self):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["data-manager", "conversion-ingest", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "--action-id" in result.output
+        assert "--batch-size" in result.output
+
+    def test_dry_run_makes_zero_network_calls(self, tmp_path):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        events_file = tmp_path / "events.jsonl"
+        events_file.write_text(
+            '{"eventTimestamp": "2026-01-01T10:00:00+04:00", "adIdentifiers": {"gclid": "abc"}}\n'
+        )
+
+        runner = CliRunner()
+        with patch("requests.request") as mock_req:
+            result = runner.invoke(
+                cli,
+                ["data-manager", "conversion-ingest", str(events_file), "--action-id", "999", "--dry-run", "--json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert not mock_req.called
+        parsed = json.loads(result.output)
+        assert parsed["status"] == "dry_run"
+        assert parsed["event_count"] == 1
+
+    def test_missing_eventtimestamp_exits_validation_with_zero_network_calls(self, tmp_path):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+        from gads_lib.output import EXIT_CODES
+
+        events_file = tmp_path / "bad_events.jsonl"
+        events_file.write_text('{"transactionId": "no-timestamp"}\n')
+
+        runner = CliRunner()
+        with patch("requests.request") as mock_req:
+            result = runner.invoke(
+                cli,
+                ["data-manager", "conversion-ingest", str(events_file), "--action-id", "999", "--dry-run"],
+            )
+
+        assert result.exit_code == EXIT_CODES["VALIDATION"], result.output
+        assert not mock_req.called
+        assert "eventTimestamp" in result.output
+
+    def test_batch_size_chunks_into_multiple_calls(self, tmp_path):
+        """3 events with --batch-size 2 must issue 2 datamanager_ingest_events calls (2 + 1)."""
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        events_file = tmp_path / "events.jsonl"
+        lines = [
+            json.dumps({"eventTimestamp": f"2026-01-0{i}T10:00:00+04:00", "adIdentifiers": {"gclid": f"g{i}"}})
+            for i in range(1, 4)
+        ]
+        events_file.write_text("\n".join(lines) + "\n")
+
+        runner = CliRunner()
+        with patch("gads_lib.cli.get_credentials", return_value=MagicMock()), \
+             patch("gads_lib.cli.datamanager_ingest_events", return_value={"requestId": "req-x"}) as mock_ingest, \
+             patch("gads_lib.cli.get_db", side_effect=SystemExit(1)):
+            result = runner.invoke(
+                cli,
+                ["data-manager", "conversion-ingest", str(events_file), "--action-id", "999",
+                 "--batch-size", "2", "--yes", "--json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert mock_ingest.call_count == 2
+        first_batch = mock_ingest.call_args_list[0][0][1]
+        second_batch = mock_ingest.call_args_list[1][0][1]
+        assert len(first_batch) == 2
+        assert len(second_batch) == 1
+
+    def test_json_output_never_claims_per_event_success(self, tmp_path):
+        """The submitted-response output must carry the async caveat, never a
+        false 'N conversions uploaded successfully' style claim (unlike the
+        legacy sync-ish `conversion upload` command, Data Manager gives no
+        per-event confirmation)."""
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        events_file = tmp_path / "events.jsonl"
+        events_file.write_text(
+            '{"eventTimestamp": "2026-01-01T10:00:00+04:00", "adIdentifiers": {"gclid": "abc"}}\n'
+        )
+
+        runner = CliRunner()
+        with patch("gads_lib.cli.get_credentials", return_value=MagicMock()), \
+             patch("gads_lib.cli.datamanager_ingest_events", return_value={"requestId": "req-y"}), \
+             patch("gads_lib.cli.get_db", side_effect=SystemExit(1)):
+            result = runner.invoke(
+                cli,
+                ["data-manager", "conversion-ingest", str(events_file), "--action-id", "999", "--yes", "--json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert parsed["status"] == "submitted"
+        assert "asynchronous" in parsed["note"].lower()
+        assert "no per-event status" in parsed["note"].lower()
+        # Must not fabricate a per-event confirmation.
+        assert "uploaded successfully" not in parsed["note"].lower()
+
+    def test_human_readable_output_never_claims_per_event_success(self, tmp_path):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        events_file = tmp_path / "events.jsonl"
+        events_file.write_text(
+            '{"eventTimestamp": "2026-01-01T10:00:00+04:00", "adIdentifiers": {"gclid": "abc"}}\n'
+        )
+
+        runner = CliRunner()
+        with patch("gads_lib.cli.get_credentials", return_value=MagicMock()), \
+             patch("gads_lib.cli.datamanager_ingest_events", return_value={"requestId": "req-z"}), \
+             patch("gads_lib.cli.get_db", side_effect=SystemExit(1)):
+            result = runner.invoke(
+                cli,
+                ["data-manager", "conversion-ingest", str(events_file), "--action-id", "999", "--yes"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "asynchronous" in result.output.lower()
+        assert "uploaded successfully" not in result.output.lower()
+
+
+class TestDataManagerAudienceUploadCli:
+    """`gads data-manager audience-upload` — CLI-level behavior."""
+
+    def test_cli_help_exits_0(self):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["data-manager", "audience-upload", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "--list-resource-name" in result.output
+
+    def test_dry_run_makes_zero_network_calls(self, tmp_path):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        csv_file = tmp_path / "contacts.csv"
+        csv_file.write_text(
+            "Phone,Email,First Name,Last Name,Country\n"
+            "+971501234567,user@example.com,John,Doe,AE\n"
+        )
+
+        runner = CliRunner()
+        with patch("requests.request") as mock_req:
+            result = runner.invoke(
+                cli,
+                ["data-manager", "audience-upload", str(csv_file),
+                 "--list-resource-name", "777", "--dry-run", "--json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert not mock_req.called
+        parsed = json.loads(result.output)
+        assert parsed["status"] == "dry_run"
+        assert parsed["member_count"] == 1
+
+    def test_json_output_includes_async_note_and_requestid(self, tmp_path):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+
+        csv_file = tmp_path / "contacts.csv"
+        csv_file.write_text(
+            "Phone,Email,First Name,Last Name,Country\n"
+            "+971501234567,user@example.com,John,Doe,AE\n"
+        )
+
+        runner = CliRunner()
+        with patch("gads_lib.cli.get_credentials", return_value=MagicMock()), \
+             patch("gads_lib.cli.datamanager_ingest_audience_members",
+                   return_value={"requestId": "req-aud-1"}), \
+             patch("gads_lib.cli.get_db", side_effect=SystemExit(1)):
+            result = runner.invoke(
+                cli,
+                ["data-manager", "audience-upload", str(csv_file),
+                 "--list-resource-name", "777", "--yes", "--json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert parsed["status"] == "submitted"
+        assert parsed["requestId"] == "req-aud-1"
+        assert "asynchronous" in parsed["note"].lower()
+
+    def test_no_valid_identifiers_exits_validation(self, tmp_path):
+        from click.testing import CliRunner
+        from gads_lib.cli import cli
+        from gads_lib.output import EXIT_CODES
+
+        csv_file = tmp_path / "empty_contacts.csv"
+        csv_file.write_text("Phone,Email,First Name,Last Name,Country\n,,,,\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["data-manager", "audience-upload", str(csv_file), "--list-resource-name", "777", "--dry-run"],
+        )
+        assert result.exit_code == EXIT_CODES["VALIDATION"], result.output

@@ -14,7 +14,7 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 
 ## Features
 
-**115 commands** across 18 groups covering the full Google Ads operational surface:
+**117 commands** across 19 groups covering the full Google Ads operational surface:
 
 | Group | Commands | Description |
 |-------|----------|-------------|
@@ -28,6 +28,7 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 | **Asset** | `asset list`, `sitelink`, `callout`, `call` | List assets, add sitelinks/callouts/call extensions (two-step creation) |
 | **Conversion** | `conversion list`, `create`, `set-primary`, `tag`, `perf`, `upload` | Conversion actions, tracking tags, Primary/Secondary toggling, performance by action, offline upload |
 | **Audience** | `audience list`, `create`, `upload`, `job-status` | Customer Match user lists, CSV upload with SHA-256 hashing + consent |
+| **Data Manager** | `data-manager conversion-ingest`, `audience-upload` | Modern events/audience ingestion via the Data Manager API — async `{requestId}`-only response, parallel to (not a replacement for) the legacy Conversion Upload / Customer Match paths |
 | **Report** | `report geo`, `hourly`, `devices`, `search-terms` | Geographic, hourly, device, and search term performance breakdowns |
 | **GBP** | `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily`, `batch-reviews`, `local-posts`, `create-post`, `delete-post` | Google Business Profile management + performance analytics + local posts CRUD |
 | **GSC** | `gsc sites`, `queries`, `pages`, `performance`, `inspect`, `sitemaps` | Google Search Console — search queries, pages, daily performance, URL Inspection API, sitemaps list |
@@ -189,6 +190,24 @@ gads audience job-status 12345       # Check upload job status
 
 CSV format: `Phone,Email,First Name,Last Name,Country` — all PII is SHA-256 hashed automatically.
 
+### Data Manager API (modern conversion/audience ingestion)
+
+```bash
+# Conversion events — JSON-lines input, one Event object per line
+gads data-manager conversion-ingest events.jsonl --action-id 123456789 --dry-run
+gads data-manager conversion-ingest events.jsonl --action-id 123456789 --batch-size 2000 --yes --json
+
+# Audience upload — same CSV shape as `audience upload`, parallel path (not a replacement)
+gads data-manager audience-upload data.csv --list-resource-name 987654321 --dry-run
+gads data-manager audience-upload data.csv --list-resource-name 987654321 --yes --json
+```
+
+> ⚠️ Both commands only ever report *"N submitted — ingestion is asynchronous, no per-item status
+> available in this response"* — the Data Manager API's `events:ingest` / `audienceMembers:ingest`
+> return only `{"requestId": "..."}` on success, with no per-event/-member confirmation (unlike the
+> legacy `conversion upload` / `audience upload` commands above). See
+> [`kb/data-manager-api.md`](kb/data-manager-api.md) for the full schema reference.
+
 ### Reports
 
 ```bash
@@ -289,6 +308,7 @@ All configuration via environment variables or `.env` file. See [`.env.example`]
 | `keyword add/remove/negative/search-terms` | Yes | `adwords` | Explorer |
 | `keyword ideas`, `keyword forecast` | Yes | `adwords` | **Standard** |
 | `audience upload` | Yes | `adwords` | Basic |
+| `data-manager conversion-ingest`, `data-manager audience-upload` | No | `datamanager` | — |
 | `campaign status/budget`, `asset *`, `mutate *` | Yes | `adwords` | Explorer |
 
 ### Agent Enforcement (optional)
@@ -324,6 +344,7 @@ Click each link → click "ENABLE" (only enable what you need):
 | Merchant API v1 (`merchantapi.googleapis.com`) | Merchant Center | [Enable](https://console.cloud.google.com/apis/library/merchantapi.googleapis.com) |
 | GA4 Data API | GA4 | [Enable](https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com) |
 | GA4 Admin API | GA4 | [Enable](https://console.cloud.google.com/apis/library/analyticsadmin.googleapis.com) |
+| Data Manager API (`datamanager.googleapis.com`) | `data-manager *` | [Enable](https://console.cloud.google.com/apis/library/datamanager.googleapis.com) |
 
 ### 3. OAuth Consent Screen
 
@@ -367,7 +388,7 @@ gads auth login        # Opens browser for OAuth
 gads doctor            # Verify everything
 ```
 
-> ⚠️ **Customer Match deprecation:** Starting April 1, 2026, `audience upload` will fail if your token has never sent a successful Customer Match request. Upload before that date or switch to Data Manager API.
+> ⚠️ **Customer Match deprecation:** Starting April 1, 2026, `audience upload` will fail if your token has never sent a successful Customer Match request. Upload before that date, or use `gads data-manager audience-upload` (the modern Data Manager API path — see [`kb/data-manager-api.md`](kb/data-manager-api.md)), which is unaffected by this deprecation.
 
 ---
 
@@ -379,7 +400,7 @@ gads-cli/
 ├── gads.sh               # Shell wrapper with .env loading
 ├── gads_lib/
 │   ├── __init__.py       # Version + public API exports
-│   ├── cli.py            # All Click command groups (108 commands)
+│   ├── cli.py            # All Click command groups (110 commands)
 │   ├── config.py         # Scope-aware env config
 │   ├── auth.py           # OAuth credential management
 │   ├── ads.py            # Google Ads REST client + GAQL + mutations (Ads v24)
@@ -387,6 +408,7 @@ gads-cli/
 │   ├── gsc.py            # Search Console client (webmasters/v3 + URL Inspection v1)
 │   ├── merchant.py       # Merchant Center client (Merchant API v1)
 │   ├── ga4.py            # GA4 Data API v1beta + Admin API v1beta
+│   ├── datamanager.py    # Data Manager API client (events:ingest, audienceMembers:ingest)
 │   ├── catalog.py        # Live Click-tree catalog emitter
 │   ├── dbread.py         # SELECT-only history-DB passthrough
 │   ├── analyze/          # 5 read-only analysis modules (lp_score, wasted_spend, ngrams, adcopy, competitive)

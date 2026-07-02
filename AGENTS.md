@@ -155,3 +155,4 @@ https://github.com/talas9/mads-cli
 --json`). Its exit-code set additionally defines a mads-specific `RATE_LIMIT=8` (Meta's Graph API
 returns explicit rate-limit error codes gads-cli's Google Ads REST calls don't surface the same
 way). `gads doctor --json` reports a `sibling_cli` field detecting `mads` on PATH.
+(skill: `mads-cli/.agents/skills/mads-cli/SKILL.md`)

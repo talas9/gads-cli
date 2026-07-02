@@ -1,0 +1,1 @@
+../../../.agents/skills/gads-cli/SKILL.md

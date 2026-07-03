@@ -847,8 +847,11 @@ def snapshot(name, save_file, as_json):
              cfg["status"], cfg["budget"], cfg["bidding_strategy"],
              cfg["target_cpa"], cfg["target_roas"]),
         )
-    conn.execute("INSERT OR REPLACE INTO snapshots VALUES (?, ?, ?, ?, ?)",
-                 (filename, today, datetime.now().strftime("%H:%M:%S"), name, ""))
+    conn.execute(
+        "INSERT OR REPLACE INTO snapshots (filename, date, time, description, related_action, platform) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (filename, today, datetime.now().strftime("%H:%M:%S"), name, "", "google_ads"),
+    )
     conn.commit()
     conn.close()
 

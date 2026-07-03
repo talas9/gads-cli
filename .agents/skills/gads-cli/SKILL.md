@@ -40,6 +40,15 @@ scopes, and a Developer Guide section. Read the specific KB file for the resourc
 touching before writing code against it — do not rely on training-data knowledge of these APIs,
 which change frequently.
 
+## Operating directive: run it yourself
+
+Execute `gads` commands yourself — don't hand the user copy-paste console/CLI steps to run
+manually. The user's involvement is reduced to the irreducible minimum: only steps a script
+genuinely cannot perform, such as clicking "Allow" in an interactive OAuth consent browser
+flow, or another physical/off-system action. For those, still do everything around the human
+step yourself — run the local server, generate and hand over the exact URL, wait for the
+callback, then verify the result. Default to action over instruction.
+
 ## Sister tool
 
 For **Meta (Facebook/Instagram) Ads** — Marketing API campaigns/ad sets/ads/creatives, Business

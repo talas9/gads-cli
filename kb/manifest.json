@@ -20,7 +20,7 @@
       "https://www.googleapis.com/auth/content"
     ],
     "status": "active",
-    "sunset_date_or_null": "2026-08-18",
+    "sunset_date_or_null": null,
     "kb_file": "merchant-api.md"
   },
   {
@@ -52,7 +52,7 @@
   {
     "api": "Google Business Profile - Account Management API",
     "slug": "gbp",
-    "current_version": "v1.1",
+    "current_version": "v1",
     "base_url": "https://mybusinessaccountmanagement.googleapis.com/v1",
     "oauth_scopes": [
       "https://www.googleapis.com/auth/business.manage"

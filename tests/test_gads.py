@@ -3225,3 +3225,129 @@ class TestDataManagerAudienceUploadCli:
             ["data-manager", "audience-upload", str(csv_file), "--list-resource-name", "777", "--dry-run"],
         )
         assert result.exit_code == EXIT_CODES["VALIDATION"], result.output
+
+
+# =============================================================================
+# GROUP — analyze_wasted_spend: per-channel-type CPA baseline segmentation
+# =============================================================================
+
+def _wasted_camp_row(name, channel_type, cost_micros, conversions, conversions_value=0):
+    return {
+        "campaign": {
+            "name": name,
+            "status": "ENABLED",
+            "advertisingChannelType": channel_type,
+        },
+        "metrics": {
+            "costMicros": str(cost_micros),
+            "conversions": conversions,
+            "conversionsValue": conversions_value,
+        },
+    }
+
+
+def _wasted_st_row(term, campaign_name, channel_type, cost_micros, conversions, clicks=10):
+    return {
+        "searchTermView": {"searchTerm": term},
+        "campaign": {"name": campaign_name, "advertisingChannelType": channel_type},
+        "metrics": {
+            "costMicros": str(cost_micros),
+            "conversions": conversions,
+            "clicks": clicks,
+        },
+    }
+
+
+class TestAnalyzeWastedSpendChannelSegmentation:
+    """Wasted-spend CPA baselines must be computed PER campaign.advertising_channel_type,
+    never as one blended figure across SEARCH/SMART/PERFORMANCE_MAX (the currency-mismatch
+    bug: Smart campaigns' cheap-but-normal local-action CPA looked wasteful against a
+    blended average contaminated by much-cheaper Search/PMax WhatsApp-pixel conversions)."""
+
+    def test_smart_campaign_normal_cpa_not_flagged_against_own_peer_group(self, fake_creds):
+        """A Smart campaign with a CPA that is normal for OTHER Smart campaigns must not be
+        flagged, even though a much-cheaper Search campaign is present in the same window.
+
+        Under the old (buggy) single blended average, campaign A's cpa (1.58) would have
+        exceeded the blended threshold (~1.55, dragged down by the huge cheap SEARCH volume).
+        Segmented by channel type, SMART's own peer-group average (~1.56) makes A's cpa
+        nowhere near its 2x threshold (~3.12).
+        """
+        from gads_lib.analyze.wasted_spend import analyze_wasted_spend
+
+        camp_rows = [
+            _wasted_camp_row("9-QZ3-TESLA-English", "SMART", 158_000_000, 100),   # cpa 1.58
+            _wasted_camp_row("9-IND4-Korean-English", "SMART", 154_000_000, 100),  # cpa 1.54
+            _wasted_camp_row("9-Search-HighIntent", "SEARCH", 38_500_000_000, 50_000),  # cpa 0.77
+        ]
+
+        with patch("gads_lib.analyze.wasted_spend.run_gaql", side_effect=[camp_rows, []]):
+            result = analyze_wasted_spend(fake_creds, days=30, min_cost=1.0, cpa_multiple=2.0)
+
+        flagged_names = {c["campaign"] for c in result["campaigns"]}
+        assert "9-QZ3-TESLA-English" not in flagged_names
+        assert "9-IND4-Korean-English" not in flagged_names
+
+        # Segmented baselines are exposed per channel type, not one blended figure.
+        assert result["avg_cpa"]["SMART"] == pytest.approx(1.56, abs=0.01)
+        assert result["avg_cpa"]["SEARCH"] == pytest.approx(0.77, abs=0.01)
+
+    def test_genuinely_wasteful_campaign_still_flagged_within_own_peer_group(self, fake_creds):
+        """A Smart campaign whose CPA is high even relative to OTHER Smart campaigns (not
+        just relative to a cross-type blend) must still be flagged as wasted."""
+        from gads_lib.analyze.wasted_spend import analyze_wasted_spend
+
+        camp_rows = [
+            _wasted_camp_row("9-QZ3-TESLA-English", "SMART", 158_000_000, 100),   # cpa 1.58
+            _wasted_camp_row("9-IND4-Korean-English", "SMART", 154_000_000, 100),  # cpa 1.54
+            _wasted_camp_row("9-Bad-Smart-Campaign", "SMART", 1_000_000_000, 50),  # cpa 20.00
+        ]
+
+        with patch("gads_lib.analyze.wasted_spend.run_gaql", side_effect=[camp_rows, []]):
+            result = analyze_wasted_spend(fake_creds, days=30, min_cost=1.0, cpa_multiple=2.0)
+
+        flagged = {c["campaign"]: c for c in result["campaigns"]}
+        assert "9-Bad-Smart-Campaign" in flagged
+        assert flagged["9-Bad-Smart-Campaign"]["reason"].startswith("below_average")
+        assert "SMART" in flagged["9-Bad-Smart-Campaign"]["reason"]
+        assert flagged["9-Bad-Smart-Campaign"]["wasted"] > 0
+        # The two normal-for-SMART campaigns remain unflagged even with the bad one present.
+        assert "9-QZ3-TESLA-English" not in flagged
+        assert "9-IND4-Korean-English" not in flagged
+
+    def test_zero_conversion_campaign_flagged_regardless_of_channel_type(self, fake_creds):
+        """Zero-conversion spend is always wasted, independent of channel-type baselines."""
+        from gads_lib.analyze.wasted_spend import analyze_wasted_spend
+
+        camp_rows = [
+            _wasted_camp_row("9-PMax-AllLocations", "PERFORMANCE_MAX", 50_000_000, 0),
+        ]
+
+        with patch("gads_lib.analyze.wasted_spend.run_gaql", side_effect=[camp_rows, []]):
+            result = analyze_wasted_spend(fake_creds, days=30, min_cost=1.0, cpa_multiple=2.0)
+
+        flagged = {c["campaign"]: c for c in result["campaigns"]}
+        assert flagged["9-PMax-AllLocations"]["reason"] == "zero_conversion"
+        assert flagged["9-PMax-AllLocations"]["wasted"] == pytest.approx(50.0)
+
+    def test_search_terms_segmented_by_their_campaigns_channel_type(self, fake_creds):
+        """Search-term wasted-spend classification uses the search term's own campaign's
+        channel-type baseline too — the same blended-average bug would otherwise leak into
+        the search-term list via the shared `_classify` helper."""
+        from gads_lib.analyze.wasted_spend import analyze_wasted_spend
+
+        camp_rows = [
+            _wasted_camp_row("9-QZ3-TESLA-English", "SMART", 158_000_000, 100),
+            _wasted_camp_row("9-Search-HighIntent", "SEARCH", 38_500_000_000, 50_000),
+        ]
+        st_rows = [
+            # Same per-unit CPA as the SMART campaign average (~1.58) — normal for SMART,
+            # must not be flagged just because SEARCH's average is far cheaper.
+            _wasted_st_row("tesla parts uae", "9-QZ3-TESLA-English", "SMART", 15_800_000, 10),
+        ]
+
+        with patch("gads_lib.analyze.wasted_spend.run_gaql", side_effect=[camp_rows, st_rows]):
+            result = analyze_wasted_spend(fake_creds, days=30, min_cost=1.0, cpa_multiple=2.0)
+
+        flagged_terms = {s["search_term"] for s in result["search_terms"]}
+        assert "tesla parts uae" not in flagged_terms
